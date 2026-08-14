@@ -1,0 +1,112 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    environment: portainer
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Bump version
+        run: |
+          cat > /tmp/bump-version.js << 'EOF'
+          const fs = require("fs");
+          const ver = JSON.parse(fs.readFileSync("version.json", "utf8"));
+          const oldVer = ver.version;
+          const newVer = (parseFloat(ver.version) + 0.01).toFixed(2);
+          ver.version = newVer;
+          ver.lastDeployed = new Date().toISOString();
+          fs.writeFileSync("version.json", JSON.stringify(ver, null, 2));
+          console.log("[VERSION] Bumped " + oldVer + " → " + newVer);
+          EOF
+          node /tmp/bump-version.js
+          cat version.json
+          rm /tmp/bump-version.js
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          if git diff --cached --quiet; then
+            echo "[VERSION] Geen wijzigingen in version.json, skip commit"
+          else
+            git commit -m "chore: auto-bump version [skip ci]"
+            git push origin main
+            echo "[VERSION] Versie gecommit en gepusht"
+          fi
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy via Portainer API
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_TOKEN: ${{ secrets.PORTAINER_API_TOKEN }}
+          PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
+        run: |
+          STACK_INFO=$(curl -s -H "X-API-Key: $PORTAINER_API_TOKEN" \
+            "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID")
+          ENDPOINT_ID=$(echo "$STACK_INFO" | jq -r '.EndpointId')
+          CURRENT_ENV=$(echo "$STACK_INFO" | jq '.Env // []')
+
+          IMAGE_LOWER=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
+          echo "Pulling latest image..."
+          curl -s -X POST \
+            -H "X-API-Key: $PORTAINER_API_TOKEN" \
+            "$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/images/create?fromImage=ghcr.io%2F${IMAGE_LOWER}&tag=latest"
+          echo "Image pulled."
+
+          STACK_FILE=$(cat docker-compose.yml)
+          curl -s -X PUT \
+            -H "X-API-Key: $PORTAINER_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"StackFileContent\": $(echo "$STACK_FILE" | jq -Rs .),
+              \"Env\": $CURRENT_ENV,
+              \"Prune\": true
+            }" \
+            "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID?endpointId=$ENDPOINT_ID"
+          echo "Deploy complete."

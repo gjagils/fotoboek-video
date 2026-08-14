@@ -1,0 +1,17 @@
+services:
+  fotoboek-video:
+    image: ghcr.io/gjagils/fotoboek-video:latest
+    container_name: fotoboek-video
+    restart: unless-stopped
+    environment:
+      # Pas aan naar het (sub)domein dat je via Cloudflare Tunnel gaat gebruiken
+      - BASE_URL=https://gerdjan.nl
+      - PORT=3000
+    ports:
+      # Alleen nodig als je 'm niet via Cloudflare Tunnel maar rechtstreeks test
+      - "3000:3000"
+    volumes:
+      # Zet hier het echte pad naar je videomap op de NAS neer, bv:
+      # - /volume1/video/fotoboek:/app/videos
+      - ./videos:/app/videos
+      - ./data:/app/data
