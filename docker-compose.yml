@@ -11,7 +11,5 @@ services:
       # Alleen nodig als je 'm niet via Cloudflare Tunnel maar rechtstreeks test
       - "3000:3000"
     volumes:
-      # Zet hier het echte pad naar je videomap op de NAS neer, bv:
-      # - /volume1/video/fotoboek:/app/videos
-      - ./videos:/app/videos
-      - ./data:/app/data
+      - /volume1/homes/gjagils/fotoboek-video/videos:/app/videos
+      - /volume1/homes/gjagils/fotoboek-video/data:/app/data
