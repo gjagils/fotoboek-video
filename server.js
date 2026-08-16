@@ -15,6 +15,7 @@ const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const PORT = process.env.PORT || 3000;
+const BASE_URL = (process.env.BASE_URL || "https://albumvideo.gerdjan.nl").replace(/\/$/, "");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
 const app = express();
@@ -60,6 +61,23 @@ function escapeHtml(value) {
 
 function adminPage(result = "") {
   const resultHtml = result ? `<pre>${escapeHtml(result)}</pre>` : "";
+  const videos = Object.entries(loadMapping()).sort((left, right) => left[1].localeCompare(right[1], "nl"));
+  const videosHtml = videos.length
+    ? `<section>
+        <h2>Videolinks</h2>
+        <div class="videos">
+          ${videos.map(([id, relativePath]) => {
+            const url = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
+            return `<article>
+              <strong>${escapeHtml(relativePath)}</strong>
+              <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
+              <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
+            </article>`;
+          }).join("")}
+        </div>
+      </section>`
+    : `<p class="empty">Nog geen video's verwerkt.</p>`;
+
   return `<!DOCTYPE html>
 <html lang="nl">
 <head>
@@ -71,6 +89,17 @@ function adminPage(result = "") {
     button { border: 0; border-radius: 8px; padding: 12px 18px; background: #2563eb; color: white; font: inherit; cursor: pointer; }
     button:hover { background: #1d4ed8; }
     pre { margin-top: 24px; padding: 16px; overflow: auto; border-radius: 8px; background: #f3f4f6; white-space: pre-wrap; }
+    section { margin-top: 36px; }
+    .videos { display: grid; gap: 12px; }
+    article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 16px; border: 1px solid #d1d5db; border-radius: 10px; }
+    article strong, article a { overflow-wrap: anywhere; }
+    article a { color: #1d4ed8; }
+    article .copy { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+    .empty { margin-top: 32px; color: #6b7280; }
+    @media (max-width: 600px) {
+      article { grid-template-columns: 1fr; }
+      article .copy { grid-column: 1; grid-row: auto; justify-self: start; }
+    }
   </style>
 </head>
 <body>
@@ -80,6 +109,28 @@ function adminPage(result = "") {
     <button type="submit">Video's scannen en QR-codes genereren</button>
   </form>
   ${resultHtml}
+  ${videosHtml}
+  <script>
+    document.querySelectorAll(".copy").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(button.dataset.url);
+        } catch {
+          const input = document.createElement("textarea");
+          input.value = button.dataset.url;
+          input.style.position = "fixed";
+          input.style.opacity = "0";
+          document.body.appendChild(input);
+          input.select();
+          document.execCommand("copy");
+          input.remove();
+        }
+        const originalText = button.textContent;
+        button.textContent = "Gekopieerd!";
+        setTimeout(() => { button.textContent = originalText; }, 1600);
+      });
+    });
+  </script>
 </body>
 </html>`;
 }

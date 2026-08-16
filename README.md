@@ -32,7 +32,8 @@ smartphone af in de browser — zonder app te hoeven installeren.
 1. Zet het mp4-bestand in `/volume1/homes/gjagils/fotoboek-video/videos/`
    (eventueel in een submap).
 2. Open `https://albumvideo.gerdjan.nl/admin`, log in als `admin` en klik op
-   **Video's scannen en QR-codes genereren**.
+   **Video's scannen en QR-codes genereren**. Daarna kun je per video de link
+   openen of met **Kopieer link** rechtstreeks voor WhatsApp kopiëren.
 
 Als alternatief kan het generate-script vanuit de container worden gestart:
    ```
