@@ -39,8 +39,9 @@ Als alternatief kan het generate-script vanuit de container worden gestart:
    node generate.js
    ```
 3. Pak de nieuwe QR-code(s) uit
-   `/volume1/homes/gjagils/fotoboek-video/data/qrcodes/<id>.png` en zet die in
-   je fotoboek.
+   `/volume1/homes/gjagils/fotoboek-video/data/qrcodes/`. De bestandsnaam bevat
+   het videopad en de geheime ID, bijvoorbeeld
+   `thailand-strand--8f3a1c9d2b.png`.
 
 ## Let op bij de video's zelf
 

@@ -49,6 +49,20 @@ function generateId() {
   return crypto.randomBytes(5).toString("hex"); // bv. "8f3a1c9d2b"
 }
 
+function qrFileName(relativePath, id) {
+  const extension = path.extname(relativePath);
+  const withoutExtension = relativePath.slice(0, -extension.length);
+  const readableName = withoutExtension
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 100) || "video";
+
+  return `${readableName}--${id}.png`;
+}
+
 async function main() {
   if (!fs.existsSync(VIDEOS_DIR)) {
     console.error(`Videomap niet gevonden: ${VIDEOS_DIR}`);
@@ -80,10 +94,19 @@ async function main() {
       console.log(`Bestaat: ${relativePath}  ->  id=${id}`);
     }
 
-    const qrPath = path.join(QR_DIR, `${id}.png`);
+    const qrPath = path.join(QR_DIR, qrFileName(relativePath, id));
+    const legacyQrPath = path.join(QR_DIR, `${id}.png`);
+
+    // Migreer eerder gegenereerde QR-codes zonder herkenbare videonaam.
+    if (fs.existsSync(legacyQrPath) && !fs.existsSync(qrPath)) {
+      fs.renameSync(legacyQrPath, qrPath);
+      console.log(`QR hernoemd: ${path.basename(qrPath)}`);
+    }
+
     if (!fs.existsSync(qrPath)) {
       const url = `${BASE_URL}/v?id=${id}`;
       await QRCode.toFile(qrPath, url, { width: 600, margin: 2 });
+      console.log(`QR gemaakt:  ${path.basename(qrPath)}`);
     }
   }
 

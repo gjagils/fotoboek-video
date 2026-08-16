@@ -16,7 +16,9 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
 - `generate.js` — scant `videos/` recursief. Nieuwe bestanden krijgen een random
   10-teken hex-ID, opgeslagen in `data/mapping.json` (id → relatief bestandspad).
   Bestaande ID's blijven stabiel bij herhaald draaien. Genereert per ID een QR-code
-  in `data/qrcodes/<id>.png` die verwijst naar `BASE_URL/v?id=<id>`.
+  in `data/qrcodes/<videonaam>--<id>.png` die verwijst naar
+  `BASE_URL/v?id=<id>`. Bestaande ID-only QR-bestanden worden bij een scan
+  automatisch naar dit herkenbare formaat hernoemd.
 - `server.js` — Express-app met twee routes:
   - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag.
   - `GET /video/<id>` — levert het bestand zelf via `res.sendFile`, wat Range-requests
