@@ -4,8 +4,7 @@ services:
     container_name: fotoboek-video
     restart: unless-stopped
     environment:
-      # Pas aan naar het (sub)domein dat je via Cloudflare Tunnel gaat gebruiken
-      - BASE_URL=https://gerdjan.nl
+      - BASE_URL=https://albumvideo.gerdjan.nl
       - PORT=3000
     ports:
       # Alleen nodig als je 'm niet via Cloudflare Tunnel maar rechtstreeks test

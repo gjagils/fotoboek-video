@@ -61,19 +61,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Commit version bump
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.json
-          if git diff --cached --quiet; then
-            echo "[VERSION] Geen wijzigingen in version.json, skip commit"
-          else
-            git commit -m "chore: auto-bump version [skip ci]"
-            git push origin main
-            echo "[VERSION] Versie gecommit en gepusht"
-          fi
-
       - name: Connect to Tailscale
         uses: tailscale/github-action@v4
         with:
@@ -87,20 +74,22 @@ jobs:
           PORTAINER_API_TOKEN: ${{ secrets.PORTAINER_API_TOKEN }}
           PORTAINER_STACK_ID: ${{ secrets.PORTAINER_STACK_ID }}
         run: |
-          STACK_INFO=$(curl -s -H "X-API-Key: $PORTAINER_API_TOKEN" \
+          test -n "$PORTAINER_STACK_ID"
+          STACK_INFO=$(curl --fail-with-body -sS -H "X-API-Key: $PORTAINER_API_TOKEN" \
             "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID")
           ENDPOINT_ID=$(echo "$STACK_INFO" | jq -r '.EndpointId')
+          test "$ENDPOINT_ID" != "null"
           CURRENT_ENV=$(echo "$STACK_INFO" | jq '.Env // []')
 
           IMAGE_LOWER=$(echo "$IMAGE_NAME" | tr '[:upper:]' '[:lower:]')
           echo "Pulling latest image..."
-          curl -s -X POST \
+          curl --fail-with-body -sS -X POST \
             -H "X-API-Key: $PORTAINER_API_TOKEN" \
             "$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/images/create?fromImage=ghcr.io%2F${IMAGE_LOWER}&tag=latest"
           echo "Image pulled."
 
           STACK_FILE=$(cat docker-compose.yml)
-          curl -s -X PUT \
+          curl --fail-with-body -sS -X PUT \
             -H "X-API-Key: $PORTAINER_API_TOKEN" \
             -H "Content-Type: application/json" \
             -d "{
@@ -110,3 +99,16 @@ jobs:
             }" \
             "$PORTAINER_URL/api/stacks/$PORTAINER_STACK_ID?endpointId=$ENDPOINT_ID"
           echo "Deploy complete."
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.json
+          if git diff --cached --quiet; then
+            echo "[VERSION] Geen wijzigingen in version.json, skip commit"
+          else
+            git commit -m "chore: auto-bump version [skip ci]"
+            git push origin main
+            echo "[VERSION] Versie gecommit en gepusht"
+          fi

@@ -22,10 +22,10 @@ smartphone af in de browser — zonder app te hoeven installeren.
      - /volume1/video/fotoboek:/app/videos
      - ./data:/app/data
    ```
-3. Zet `BASE_URL` in `docker-compose.yml` op het (sub)domein dat je gaat gebruiken,
-   bv. `https://gerdjan.nl` (en route dat via je bestaande Cloudflare Tunnel naar deze
-   container op poort 3000).
-4. Start de container (via Portainer, of `docker compose up -d --build`).
+3. De productie-URL is `https://albumvideo.gerdjan.nl`. Laat de bestaande
+   Cloudflare Tunnel doorsturen naar poort `3000` van de NAS.
+4. De productiecontainer wordt automatisch via GitHub Actions en Portainer
+   bijgewerkt bij iedere push naar `main`.
 
 ## Nieuwe video's toevoegen
 
