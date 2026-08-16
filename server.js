@@ -7,14 +7,106 @@
 
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const { execFile } = require("child_process");
 const express = require("express");
 
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const PORT = process.env.PORT || 3000;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
 const app = express();
+let generationInProgress = false;
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function requireAdmin(req, res, next) {
+  const authorization = req.get("authorization") || "";
+  const encodedCredentials = authorization.startsWith("Basic ") ? authorization.slice(6) : "";
+  let password = "";
+
+  try {
+    const credentials = Buffer.from(encodedCredentials, "base64").toString("utf8");
+    const separator = credentials.indexOf(":");
+    password = separator >= 0 ? credentials.slice(separator + 1) : "";
+  } catch {
+    password = "";
+  }
+
+  if (!ADMIN_PASSWORD || !safeEqual(password, ADMIN_PASSWORD)) {
+    res.set("WWW-Authenticate", 'Basic realm="Fotoboek beheer", charset="UTF-8"');
+    res.status(401).send("Inloggen vereist.");
+    return;
+  }
+
+  res.set("Cache-Control", "no-store");
+  next();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function adminPage(result = "") {
+  const resultHtml = result ? `<pre>${escapeHtml(result)}</pre>` : "";
+  return `<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fotoboek-video beheer</title>
+  <style>
+    body { max-width: 760px; margin: 48px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
+    button { border: 0; border-radius: 8px; padding: 12px 18px; background: #2563eb; color: white; font: inherit; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    pre { margin-top: 24px; padding: 16px; overflow: auto; border-radius: 8px; background: #f3f4f6; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Fotoboek-video beheer</h1>
+  <p>Scan de videomap en maak ontbrekende geheime links en QR-codes aan.</p>
+  <form method="post" action="/admin/generate">
+    <button type="submit">Video's scannen en QR-codes genereren</button>
+  </form>
+  ${resultHtml}
+</body>
+</html>`;
+}
+
+app.get("/admin", requireAdmin, (req, res) => {
+  res.status(200).type("html").send(adminPage());
+});
+
+app.post("/admin/generate", requireAdmin, (req, res) => {
+  if (generationInProgress) {
+    res.status(409).type("html").send(adminPage("Er draait al een scan. Probeer het straks opnieuw."));
+    return;
+  }
+
+  generationInProgress = true;
+  execFile(process.execPath, [path.join(__dirname, "generate.js")], { timeout: 5 * 60 * 1000 }, (error, stdout, stderr) => {
+    generationInProgress = false;
+    const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+
+    if (error) {
+      res.status(500).type("html").send(adminPage(`Genereren mislukt.\n${output || error.message}`));
+      return;
+    }
+
+    res.status(200).type("html").send(adminPage(output || "Genereren voltooid."));
+  });
+});
 
 function loadMapping() {
   if (!fs.existsSync(MAPPING_FILE)) return {};
@@ -83,7 +175,8 @@ app.get("/video/:id", (req, res) => {
   });
 });
 
-// Geen enkele andere route bestaat (dus ook geen mapoverzicht of index-listing)
+// Geen enkele andere route bestaat (dus ook geen mapoverzicht of index-listing).
+// /admin is alleen beschikbaar met het beheerderswachtwoord.
 app.use((req, res) => {
   res.status(404).send("Niet gevonden.");
 });

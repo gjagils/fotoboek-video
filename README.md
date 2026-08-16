@@ -29,12 +29,18 @@ smartphone af in de browser — zonder app te hoeven installeren.
 
 ## Nieuwe video's toevoegen
 
-1. Zet het mp4-bestand in `videos/` (evt. in een submap).
-2. Draai het generate-script:
+1. Zet het mp4-bestand in `/volume1/homes/gjagils/fotoboek-video/videos/`
+   (eventueel in een submap).
+2. Open `https://albumvideo.gerdjan.nl/admin`, log in als `admin` en klik op
+   **Video's scannen en QR-codes genereren**.
+
+Als alternatief kan het generate-script vanuit de container worden gestart:
    ```
-   docker compose run --rm fotoboek-video node generate.js
+   node generate.js
    ```
-3. Pak de nieuwe QR-code(s) uit `data/qrcodes/<id>.png` en zet die in je fotoboek.
+3. Pak de nieuwe QR-code(s) uit
+   `/volume1/homes/gjagils/fotoboek-video/data/qrcodes/<id>.png` en zet die in
+   je fotoboek.
 
 ## Let op bij de video's zelf
 

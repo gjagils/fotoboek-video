@@ -40,6 +40,8 @@ Bij iedere push naar `main` bouwt GitHub Actions de image en pusht die naar
 Portainer, pullt de nieuwste image en werkt de bestaande stack bij. De benodigde
 GitHub-secrets staan per repository ingesteld. Het publieke adres is
 `https://albumvideo.gerdjan.nl`; de Cloudflare Tunnel verwijst naar NAS-poort 3000.
+De beveiligde beheerpagina op `/admin` kan `generate.js` starten. Authenticatie
+gebruikt gebruiker `admin` en `ADMIN_PASSWORD` uit de Portainer stackomgeving.
 
 ## Losse commando's
 

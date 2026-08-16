@@ -6,6 +6,7 @@ services:
     environment:
       - BASE_URL=https://albumvideo.gerdjan.nl
       - PORT=3000
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
     ports:
       # Alleen nodig als je 'm niet via Cloudflare Tunnel maar rechtstreeks test
       - "3000:3000"
