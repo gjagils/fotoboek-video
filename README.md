@@ -33,7 +33,8 @@ smartphone af in de browser — zonder app te hoeven installeren.
    (eventueel in een submap).
 2. Open `https://albumvideo.gerdjan.nl/admin`, log in als `admin` en klik op
    **Video's scannen en QR-codes genereren**. Daarna kun je per video de link
-   openen of met **Kopieer link** rechtstreeks voor WhatsApp kopiëren.
+   openen, met **Kopieer link** rechtstreeks voor WhatsApp kopiëren of met
+   **Download QR** de bijbehorende PNG downloaden.
    De WhatsApp-linkpreview gebruikt automatisch de videobestandsnaam als titel.
 
 Als alternatief kan het generate-script vanuit de container worden gestart:

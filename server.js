@@ -13,6 +13,7 @@ const express = require("express");
 
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+const QR_DIR = path.join(DATA_DIR, "qrcodes");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const PORT = process.env.PORT || 3000;
 const BASE_URL = (process.env.BASE_URL || "https://albumvideo.gerdjan.nl").replace(/\/$/, "");
@@ -71,7 +72,10 @@ function adminPage(result = "") {
             return `<article>
               <strong>${escapeHtml(relativePath)}</strong>
               <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
-              <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
+              <div class="actions">
+                <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
+                <a class="button secondary" href="/admin/qr/${encodeURIComponent(id)}">Download QR</a>
+              </div>
             </article>`;
           }).join("")}
         </div>
@@ -86,19 +90,21 @@ function adminPage(result = "") {
   <title>Fotoboek-video beheer</title>
   <style>
     body { max-width: 760px; margin: 48px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
-    button { border: 0; border-radius: 8px; padding: 12px 18px; background: #2563eb; color: white; font: inherit; cursor: pointer; }
-    button:hover { background: #1d4ed8; }
+    button, .button { border: 0; border-radius: 8px; padding: 12px 18px; background: #2563eb; color: white; font: inherit; cursor: pointer; text-decoration: none; }
+    button:hover, .button:hover { background: #1d4ed8; }
+    .button.secondary { background: #374151; }
+    .button.secondary:hover { background: #1f2937; }
     pre { margin-top: 24px; padding: 16px; overflow: auto; border-radius: 8px; background: #f3f4f6; white-space: pre-wrap; }
     section { margin-top: 36px; }
     .videos { display: grid; gap: 12px; }
     article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 16px; border: 1px solid #d1d5db; border-radius: 10px; }
-    article strong, article a { overflow-wrap: anywhere; }
-    article a { color: #1d4ed8; }
-    article .copy { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+    article strong, article > a { overflow-wrap: anywhere; }
+    article > a { color: #1d4ed8; }
+    article .actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; gap: 8px; }
     .empty { margin-top: 32px; color: #6b7280; }
     @media (max-width: 600px) {
       article { grid-template-columns: 1fr; }
-      article .copy { grid-column: 1; grid-row: auto; justify-self: start; }
+      article .actions { grid-column: 1; grid-row: auto; justify-self: start; flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -137,6 +143,27 @@ function adminPage(result = "") {
 
 app.get("/admin", requireAdmin, (req, res) => {
   res.status(200).type("html").send(adminPage());
+});
+
+app.get("/admin/qr/:id", requireAdmin, (req, res) => {
+  const id = String(req.params.id || "");
+  const mapping = loadMapping();
+
+  if (!/^[a-f0-9]{10}$/.test(id) || !mapping[id] || !fs.existsSync(QR_DIR)) {
+    res.status(404).send("QR-code niet gevonden.");
+    return;
+  }
+
+  const qrFileName = fs.readdirSync(QR_DIR).find((fileName) =>
+    fileName === `${id}.png` || fileName.endsWith(`--${id}.png`)
+  );
+
+  if (!qrFileName) {
+    res.status(404).send("QR-code niet gevonden. Draai eerst de generator.");
+    return;
+  }
+
+  res.download(path.join(QR_DIR, qrFileName), qrFileName);
 });
 
 app.post("/admin/generate", requireAdmin, (req, res) => {
