@@ -175,12 +175,21 @@ app.get("/v", (req, res) => {
     return;
   }
 
+  const videoTitle = path.parse(relativePath).name;
+  const escapedTitle = escapeHtml(videoTitle);
+  const pageUrl = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
+
   const html = `<!DOCTYPE html>
 <html lang="nl">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Filmpje</title>
+  <title>${escapedTitle}</title>
+  <meta name="description" content="Bekijk ${escapedTitle}" />
+  <meta property="og:type" content="video.other" />
+  <meta property="og:title" content="${escapedTitle}" />
+  <meta property="og:description" content="Bekijk deze video" />
+  <meta property="og:url" content="${escapeHtml(pageUrl)}" />
   <style>
     html, body { margin: 0; height: 100%; background: #000; }
     .wrap { display: flex; align-items: center; justify-content: center; height: 100%; }
