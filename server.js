@@ -60,6 +60,20 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function qrDownloadFileName(relativePath, id) {
+  const extension = path.extname(relativePath);
+  const withoutExtension = relativePath.slice(0, -extension.length);
+  const readableName = withoutExtension
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 100) || "video";
+
+  return `${readableName}--${id}.png`;
+}
+
 function adminPage(result = "") {
   const resultHtml = result ? `<pre>${escapeHtml(result)}</pre>` : "";
   const videos = Object.entries(loadMapping()).sort((left, right) => left[1].localeCompare(right[1], "nl"));
@@ -163,7 +177,7 @@ app.get("/admin/qr/:id", requireAdmin, (req, res) => {
     return;
   }
 
-  res.download(path.join(QR_DIR, qrFileName), qrFileName);
+  res.download(path.join(QR_DIR, qrFileName), qrDownloadFileName(mapping[id], id));
 });
 
 app.post("/admin/generate", requireAdmin, (req, res) => {
