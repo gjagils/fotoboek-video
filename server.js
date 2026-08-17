@@ -122,7 +122,8 @@ function adminPage(result = "") {
     input:focus, select:focus { outline: 3px solid rgba(226, 15, 103, .15); border-color: #df1768; }
     .export-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
     .preview-shell { padding: 14px; border-radius: 12px; background: white; box-shadow: 0 10px 28px rgba(64, 21, 39, .12); }
-    #qr-canvas { display: block; width: 100%; height: auto; background: white; }
+    .preview-shell.transparent { background-color: #f7f7f7; background-image: linear-gradient(45deg, #e6e6e6 25%, transparent 25%), linear-gradient(-45deg, #e6e6e6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6e6e6 75%), linear-gradient(-45deg, transparent 75%, #e6e6e6 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0; }
+    #qr-canvas { display: block; width: 100%; height: auto; background: transparent; }
     .print-note { margin: 10px 0 0; color: #806573; font-size: 13px; text-align: center; }
     .videos { display: grid; gap: 12px; }
     article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 16px; border: 1px solid #d1d5db; border-radius: 10px; }
@@ -163,24 +164,33 @@ function adminPage(result = "") {
             <option value="clean">Rustig zonder kader</option>
           </select>
         </label>
+        <label>Achtergrond
+          <select id="design-background">
+            <option value="transparent">Transparant</option>
+            <option value="white">Wit · Albelli veilig</option>
+          </select>
+        </label>
         <div class="export-actions">
           <button id="download-design" type="button">Download PNG · 300 dpi</button>
           <button id="download-jpg" class="secondary" type="button">JPG reserve</button>
         </div>
       </div>
       <div>
-        <div class="preview-shell"><canvas id="qr-canvas" width="1800" height="2250"></canvas></div>
-        <p class="print-note">Witte achtergrond · PNG · 1800 × 2250 px</p>
+        <div class="preview-shell transparent"><canvas id="qr-canvas" width="1800" height="2250"></canvas></div>
+        <p class="print-note" id="print-note">Transparante PNG · 1800 × 2250 px · 300 dpi</p>
       </div>
     </div>
   </section>
   ${videosHtml}
   <script>
     const canvas = document.getElementById("qr-canvas");
-    const context = canvas.getContext("2d", { alpha: false });
+    const context = canvas.getContext("2d", { alpha: true });
     const urlInput = document.getElementById("design-url");
     const titleInput = document.getElementById("design-title");
     const styleInput = document.getElementById("design-style");
+    const backgroundInput = document.getElementById("design-background");
+    const previewShell = document.querySelector(".preview-shell");
+    const printNote = document.getElementById("print-note");
     let qrImage = null;
     let qrTimer = null;
 
@@ -256,9 +266,13 @@ function adminPage(result = "") {
     function drawDesign() {
       const title = (titleInput.value.trim() || "VIDEO").toUpperCase();
       const pink = styleInput.value === "pink";
+      const transparent = backgroundInput.value === "transparent";
       context.save();
-      context.fillStyle = "#ffffff";
-      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      if (!transparent) {
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+      }
 
       if (pink) {
         context.strokeStyle = "#df0e68";
@@ -273,13 +287,15 @@ function adminPage(result = "") {
         context.stroke();
       }
 
-      context.fillStyle = "#ffffff";
-      context.fillRect(295, 245, 1210, 1210);
+      if (!transparent) {
+        context.fillStyle = "#ffffff";
+        context.fillRect(295, 245, 1210, 1210);
+      }
       if (qrImage) {
         context.imageSmoothingEnabled = false;
         context.drawImage(qrImage, 300, 250, 1200, 1200);
       } else {
-        context.fillStyle = "#f7e8ef";
+        context.fillStyle = transparent ? "rgba(223, 14, 104, .08)" : "#f7e8ef";
         context.fillRect(300, 250, 1200, 1200);
       }
 
@@ -316,7 +332,8 @@ function adminPage(result = "") {
         return;
       }
       try {
-        const response = await fetch("/admin/qr-preview?url=" + encodeURIComponent(value));
+        const transparent = backgroundInput.value === "transparent";
+        const response = await fetch("/admin/qr-preview?transparent=" + (transparent ? "1" : "0") + "&url=" + encodeURIComponent(value));
         if (!response.ok) throw new Error("Ongeldige URL");
         const blob = await response.blob();
         const objectUrl = URL.createObjectURL(blob);
@@ -383,11 +400,26 @@ function adminPage(result = "") {
     });
     titleInput.addEventListener("input", drawDesign);
     styleInput.addEventListener("change", drawDesign);
+    backgroundInput.addEventListener("change", () => {
+      const transparent = backgroundInput.value === "transparent";
+      previewShell.classList.toggle("transparent", transparent);
+      printNote.textContent = transparent
+        ? "Transparante PNG · 1800 × 2250 px · 300 dpi"
+        : "Witte PNG · 1800 × 2250 px · 300 dpi · Albelli veilig";
+      updateQr();
+    });
     document.getElementById("download-design").addEventListener("click", () => {
       canvas.toBlob(async (blob) => downloadBlob(await pngAt300Dpi(blob), "png"), "image/png");
     });
     document.getElementById("download-jpg").addEventListener("click", () => {
-      canvas.toBlob((blob) => downloadBlob(blob, "jpg"), "image/jpeg", 0.96);
+      const jpgCanvas = document.createElement("canvas");
+      jpgCanvas.width = canvas.width;
+      jpgCanvas.height = canvas.height;
+      const jpgContext = jpgCanvas.getContext("2d", { alpha: false });
+      jpgContext.fillStyle = "#ffffff";
+      jpgContext.fillRect(0, 0, jpgCanvas.width, jpgCanvas.height);
+      jpgContext.drawImage(canvas, 0, 0);
+      jpgCanvas.toBlob((blob) => downloadBlob(blob, "jpg"), "image/jpeg", 0.96);
     });
 
     drawDesign();
@@ -423,6 +455,7 @@ app.get("/admin", requireAdmin, (req, res) => {
 
 app.get("/admin/qr-preview", requireAdmin, async (req, res) => {
   const value = String(req.query.url || "").trim();
+  const transparent = req.query.transparent === "1";
 
   try {
     const url = new URL(value);
@@ -435,7 +468,7 @@ app.get("/admin/qr-preview", requireAdmin, async (req, res) => {
       width: 1200,
       margin: 4,
       errorCorrectionLevel: "M",
-      color: { dark: "#111111", light: "#ffffff" },
+      color: { dark: "#111111", light: transparent ? "#00000000" : "#ffffff" },
     });
     res.status(200).type("png").send(png);
   } catch {

@@ -53,9 +53,10 @@ Op de beveiligde beheerpagina staat een QR Studio. Klik bij een video op
 direct. De roze reiskaderstijl bevat het video-icoon, de titel en subtiele roze
 drukwerkdetails uit het Thailand-fotoboek.
 
-De PNG-export is 1800 × 2250 pixels, heeft een volledig witte achtergrond en
-bevat 300-dpi-metadata. Voor drukdiensten die PNG anders verwerken is ook een
-JPG-reserve-export beschikbaar.
+De PNG-export is 1800 × 2250 pixels en bevat 300-dpi-metadata. De achtergrond
+kan transparant of wit worden geëxporteerd; transparant is standaard. Gebruik
+voor Albelli bij voorkeur **Wit · Albelli veilig**. De JPG-reserve-export heeft
+altijd een witte achtergrond.
 
 ## Let op bij de video's zelf
 
