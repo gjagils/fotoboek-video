@@ -46,6 +46,17 @@ Als alternatief kan het generate-script vanuit de container worden gestart:
    het videopad en de geheime ID, bijvoorbeeld
    `thailand-strand--8f3a1c9d2b.png`.
 
+## QR Studio voor het fotoboek
+
+Op de beveiligde beheerpagina staat een QR Studio. Klik bij een video op
+**Ontwerp kader**, pas eventueel URL, titel en stijl aan en bekijk het resultaat
+direct. De roze reiskaderstijl bevat het video-icoon, de titel en subtiele roze
+drukwerkdetails uit het Thailand-fotoboek.
+
+De PNG-export is 1800 × 2250 pixels, heeft een volledig witte achtergrond en
+bevat 300-dpi-metadata. Voor drukdiensten die PNG anders verwerken is ook een
+JPG-reserve-export beschikbaar.
+
 ## Let op bij de video's zelf
 
 - Gebruik H.264/mp4 — dat speelt native af in Safari (iOS) en Chrome (Android).
