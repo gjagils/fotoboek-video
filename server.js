@@ -260,17 +260,6 @@ function adminPage(result = "") {
         context.lineTo(1485, 1716 + line * 36);
         context.stroke();
       }
-      context.lineWidth = 11;
-      context.beginPath();
-      context.moveTo(1510, 1665);
-      context.bezierCurveTo(1535, 1585, 1470, 1535, 1392, 1578);
-      context.stroke();
-      context.beginPath();
-      context.moveTo(1392, 1578);
-      context.lineTo(1436, 1550);
-      context.moveTo(1392, 1578);
-      context.lineTo(1432, 1610);
-      context.stroke();
       context.restore();
     }
 

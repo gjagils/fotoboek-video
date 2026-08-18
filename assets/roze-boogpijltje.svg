@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700">
+  <title>Subtiel roze handgetekend boogpijltje</title>
+  <rect width="1200" height="700" fill="none"/>
+  <g fill="none" stroke="#df0e68" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M1080 565 C 980 310, 690 170, 245 225" stroke-width="28"/>
+    <path d="M245 225 L 350 137 M245 225 L 367 285" stroke-width="28"/>
+    <path d="M1074 574 C 965 323, 681 184, 252 237" stroke-width="7" opacity="0.26"/>
+  </g>
+</svg>

@@ -51,8 +51,7 @@ Als alternatief kan het generate-script vanuit de container worden gestart:
 Op de beveiligde beheerpagina staat een QR Studio. Klik bij een video op
 **Ontwerp kader**, pas eventueel URL, titel en stijl aan en bekijk het resultaat
 direct. De roze reiskaderstijl bevat het video-icoon, de titel en subtiele roze
-drukwerkdetails uit het Thailand-fotoboek, waaronder een klein handgetekend
-boogpijltje dat naar de QR-code wijst.
+drukwerkdetails uit het Thailand-fotoboek.
 
 De PNG-export is 1800 × 2250 pixels en bevat 300-dpi-metadata. De achtergrond
 kan transparant of wit worden geëxporteerd; transparant is standaard. Gebruik
