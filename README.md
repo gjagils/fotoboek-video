@@ -53,6 +53,10 @@ Op de beveiligde beheerpagina staat een QR Studio. Klik bij een video op
 direct. De roze reiskaderstijl bevat het video-icoon, de titel en subtiele roze
 drukwerkdetails uit het Thailand-fotoboek.
 
+De stijl **Startbeeld-filmkaart** voegt een lokaal gekozen startbeeld als brede
+filmstill boven de QR-code toe. Het beeld blijft in de browser en wordt niet naar
+de server geüpload. De QR houdt een eigen rustige zone voor betrouwbare scanning.
+
 De PNG-export is 1800 × 2250 pixels en bevat 300-dpi-metadata. De achtergrond
 kan transparant of wit worden geëxporteerd; transparant is standaard. Gebruik
 voor Albelli bij voorkeur **Wit · Albelli veilig**. De JPG-reserve-export heeft

@@ -161,8 +161,13 @@ function adminPage(result = "") {
         <label>Stijl
           <select id="design-style">
             <option value="pink">Roze reiskader</option>
+            <option value="photo">Startbeeld-filmkaart</option>
             <option value="clean">Rustig zonder kader</option>
           </select>
+        </label>
+        <label>Startbeeld
+          <input id="design-image" type="file" accept="image/png,image/jpeg,image/webp" />
+          <small>Blijft lokaal in je browser; gebruik dit veld voor de startbeeld-filmkaart.</small>
         </label>
         <label>Achtergrond
           <select id="design-background">
@@ -188,10 +193,12 @@ function adminPage(result = "") {
     const urlInput = document.getElementById("design-url");
     const titleInput = document.getElementById("design-title");
     const styleInput = document.getElementById("design-style");
+    const imageInput = document.getElementById("design-image");
     const backgroundInput = document.getElementById("design-background");
     const previewShell = document.querySelector(".preview-shell");
     const printNote = document.getElementById("print-note");
     let qrImage = null;
+    let startImage = null;
     let qrTimer = null;
 
     function roundedRect(ctx, x, y, width, height, radius) {
@@ -263,9 +270,23 @@ function adminPage(result = "") {
       context.restore();
     }
 
+    function drawImageCover(image, x, y, width, height, radius) {
+      const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+      const sourceWidth = width / scale;
+      const sourceHeight = height / scale;
+      const sourceX = (image.naturalWidth - sourceWidth) / 2;
+      const sourceY = (image.naturalHeight - sourceHeight) / 2;
+      context.save();
+      roundedRect(context, x, y, width, height, radius);
+      context.clip();
+      context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, x, y, width, height);
+      context.restore();
+    }
+
     function drawDesign() {
       const title = (titleInput.value.trim() || "VIDEO").toUpperCase();
       const pink = styleInput.value === "pink";
+      const photo = styleInput.value === "photo";
       const transparent = backgroundInput.value === "transparent";
       context.save();
       context.clearRect(0, 0, canvas.width, canvas.height);
@@ -287,16 +308,38 @@ function adminPage(result = "") {
         context.stroke();
       }
 
+      if (photo) {
+        if (startImage) {
+          drawImageCover(startImage, 120, 105, 1560, 620, 64);
+        } else {
+          context.fillStyle = "rgba(223, 14, 104, .10)";
+          roundedRect(context, 120, 105, 1560, 620, 64);
+          context.fill();
+          context.fillStyle = "#9b5975";
+          context.font = "700 48px 'Avenir Next Condensed', 'Trebuchet MS', sans-serif";
+          context.textAlign = "center";
+          context.fillText("KIES EEN STARTBEELD", 900, 430);
+          context.textAlign = "start";
+        }
+        context.strokeStyle = "#df0e68";
+        context.lineWidth = 18;
+        roundedRect(context, 120, 105, 1560, 620, 64);
+        context.stroke();
+      }
+
+      const qrX = photo ? 410 : 300;
+      const qrY = photo ? 775 : 250;
+      const qrSize = photo ? 980 : 1200;
       if (!transparent) {
         context.fillStyle = "#ffffff";
-        context.fillRect(295, 245, 1210, 1210);
+        context.fillRect(qrX - 5, qrY - 5, qrSize + 10, qrSize + 10);
       }
       if (qrImage) {
         context.imageSmoothingEnabled = false;
-        context.drawImage(qrImage, 300, 250, 1200, 1200);
+        context.drawImage(qrImage, qrX, qrY, qrSize, qrSize);
       } else {
         context.fillStyle = transparent ? "rgba(223, 14, 104, .08)" : "#f7e8ef";
-        context.fillRect(300, 250, 1200, 1200);
+        context.fillRect(qrX, qrY, qrSize, qrSize);
       }
 
       if (pink) drawPinkDetails();
@@ -306,19 +349,20 @@ function adminPage(result = "") {
       const iconWidth = 120;
       const gap = 42;
       const startX = (canvas.width - textWidth - iconWidth - gap) / 2;
-      const titleY = 1940;
+      const titleY = photo ? 2010 : 1940;
       drawVideoIcon(startX + 48, titleY - 38);
       context.fillStyle = "#202020";
       context.textBaseline = "alphabetic";
       context.fillText(title, startX + iconWidth + gap, titleY);
 
-      if (pink) {
+      if (pink || photo) {
         context.strokeStyle = "#df0e68";
         context.lineWidth = 20;
         context.lineCap = "round";
         context.beginPath();
-        context.moveTo(530, 2045);
-        context.quadraticCurveTo(900, 2070, 1270, 2045);
+        const lineY = photo ? 2120 : 2045;
+        context.moveTo(530, lineY);
+        context.quadraticCurveTo(900, lineY + 25, 1270, lineY);
         context.stroke();
       }
       context.restore();
@@ -400,6 +444,23 @@ function adminPage(result = "") {
     });
     titleInput.addEventListener("input", drawDesign);
     styleInput.addEventListener("change", drawDesign);
+    imageInput.addEventListener("change", () => {
+      const file = imageInput.files && imageInput.files[0];
+      if (!file) {
+        startImage = null;
+        drawDesign();
+        return;
+      }
+      const objectUrl = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(objectUrl);
+        startImage = image;
+        styleInput.value = "photo";
+        drawDesign();
+      };
+      image.src = objectUrl;
+    });
     backgroundInput.addEventListener("change", () => {
       const transparent = backgroundInput.value === "transparent";
       previewShell.classList.toggle("transparent", transparent);
