@@ -15,6 +15,8 @@ const QRCode = require("qrcode");
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const QR_DIR = path.join(DATA_DIR, "qrcodes");
+const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
+const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const PORT = process.env.PORT || 3000;
 const BASE_URL = (process.env.BASE_URL || "https://albumvideo.gerdjan.nl").replace(/\/$/, "");
@@ -617,7 +619,7 @@ app.get("/v", (req, res) => {
 </head>
 <body>
   <div class="wrap">
-    <video controls playsinline preload="metadata">
+    <video controls playsinline preload="metadata" poster="/thumb/${encodeURIComponent(id)}">
       <source src="/video/${encodeURIComponent(id)}" type="video/mp4" />
       Je browser ondersteunt deze video niet.
     </video>
@@ -630,6 +632,9 @@ app.get("/v", (req, res) => {
 
 // Video-bestand zelf. res.sendFile ondersteunt Range-requests automatisch,
 // dat is nodig zodat je op je telefoon door de video heen kunt spoelen.
+// Als generate.js een "streamable" kopie heeft gemaakt (moov-atom vooraan,
+// zie STREAM_DIR), gebruiken we die: de browser kan dan direct beginnen met
+// afspelen in plaats van eerst het hele bestand te moeten downloaden.
 app.get("/video/:id", (req, res) => {
   const mapping = loadMapping();
   const relativePath = mapping[req.params.id];
@@ -639,19 +644,94 @@ app.get("/video/:id", (req, res) => {
     return;
   }
 
-  const absolutePath = path.join(VIDEOS_DIR, relativePath);
+  const streamablePath = path.join(STREAM_DIR, `${req.params.id}.mp4`);
+  const absolutePath = fs.existsSync(streamablePath) ? streamablePath : path.join(VIDEOS_DIR, relativePath);
 
-  // Veiligheidscheck: voorkom dat iemand via het pad buiten VIDEOS_DIR komt
-  if (!absolutePath.startsWith(path.resolve(VIDEOS_DIR))) {
+  // Veiligheidscheck: voorkom dat iemand via het pad buiten de toegestane mappen komt
+  if (!absolutePath.startsWith(path.resolve(VIDEOS_DIR)) && !absolutePath.startsWith(path.resolve(STREAM_DIR))) {
     res.status(400).send("Ongeldig pad.");
     return;
   }
 
+  res.set("Cache-Control", "public, max-age=31536000, immutable");
   res.sendFile(absolutePath, (err) => {
     if (err && !res.headersSent) {
       res.status(404).send("Video niet gevonden.");
     }
   });
+});
+
+// Thumbnail (eerste frame) van een video, gebruikt als poster op de afspeelpagina
+// en op de publieke galerij-pagina.
+app.get("/thumb/:id", (req, res) => {
+  const mapping = loadMapping();
+  const id = req.params.id;
+
+  if (!mapping[id]) {
+    res.status(404).send("Thumbnail niet gevonden.");
+    return;
+  }
+
+  const thumbPath = path.join(THUMB_DIR, `${id}.jpg`);
+  if (!fs.existsSync(thumbPath)) {
+    res.status(404).send("Thumbnail niet gevonden.");
+    return;
+  }
+
+  res.set("Cache-Control", "public, max-age=31536000, immutable");
+  res.sendFile(thumbPath);
+});
+
+// Publieke galerij: overzicht van alle video's per map, met thumbnails,
+// zodat je ze ook aan mensen kunt laten zien zonder het fotoboek erbij.
+app.get("/gallery", (req, res) => {
+  const mapping = loadMapping();
+  const entries = Object.entries(mapping).sort((left, right) => left[1].localeCompare(right[1], "nl"));
+
+  const groups = new Map();
+  for (const [id, relativePath] of entries) {
+    const folder = path.dirname(relativePath);
+    const folderName = folder === "." ? "Overig" : folder;
+    if (!groups.has(folderName)) groups.set(folderName, []);
+    groups.get(folderName).push({ id, name: path.parse(relativePath).name });
+  }
+
+  const sectionsHtml = groups.size
+    ? [...groups.entries()].map(([folderName, videos]) => `
+      <section>
+        <h2>${escapeHtml(folderName)}</h2>
+        <div class="grid">
+          ${videos.map(({ id, name }) => `
+            <a class="card" href="/v?id=${encodeURIComponent(id)}">
+              <img src="/thumb/${encodeURIComponent(id)}" alt="${escapeHtml(name)}" loading="lazy" />
+              <span>${escapeHtml(name)}</span>
+            </a>`).join("")}
+        </div>
+      </section>`).join("")
+    : `<p class="empty">Nog geen video's beschikbaar.</p>`;
+
+  res.status(200).type("html").send(`<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Video's</title>
+  <style>
+    body { max-width: 960px; margin: 40px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
+    h1 { margin-bottom: 4px; }
+    h2 { margin-top: 40px; text-transform: capitalize; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
+    .card { display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
+    .card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: #e5e7eb; }
+    .card span { font-size: 14px; overflow-wrap: anywhere; }
+    .empty { margin-top: 32px; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>Video's</h1>
+  ${sectionsHtml}
+</body>
+</html>`);
 });
 
 // Geen enkele andere route bestaat (dus ook geen mapoverzicht of index-listing).

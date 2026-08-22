@@ -18,12 +18,25 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
   Bestaande ID's blijven stabiel bij herhaald draaien. Genereert per ID een QR-code
   in `data/qrcodes/<videonaam>--<id>.png` die verwijst naar
   `BASE_URL/v?id=<id>`. Bestaande ID-only QR-bestanden worden bij een scan
-  automatisch naar dit herkenbare formaat hernoemd.
-- `server.js` — Express-app met twee routes:
-  - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag.
-  - `GET /video/<id>` — levert het bestand zelf via `res.sendFile`, wat Range-requests
-    ondersteunt (nodig om te kunnen spoelen/scrubben op mobiel). Onbekende ID's en elk
-    ander pad geven 404 — er is geen manier om de mappenstructuur te doorbladeren.
+  automatisch naar dit herkenbare formaat hernoemd. Genereert daarnaast via ffmpeg
+  per video een thumbnail (`data/thumbnails/<id>.jpg`, eerste frame op 0.5s) en een
+  "streamable" kopie (`data/streamable/<id>.mp4`, remux met `-movflags +faststart`,
+  geen her-encode) zodat de browser direct kan starten met afspelen. Beide worden
+  alleen aangemaakt als ze nog niet bestaan; het origineel in `videos/` blijft
+  ongewijzigd. Vereist `ffmpeg` in de container (zie Dockerfile).
+- `server.js` — Express-app met de volgende routes:
+  - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag, `poster` naar
+    `/thumb/<id>`.
+  - `GET /video/<id>` — levert het videobestand via `res.sendFile`, wat Range-requests
+    ondersteunt (nodig om te kunnen spoelen/scrubben op mobiel). Gebruikt de
+    streamable kopie uit `data/streamable/` als die bestaat, anders het origineel.
+    Onbekende ID's geven 404.
+  - `GET /thumb/<id>` — levert de thumbnail-JPEG van een video.
+  - `GET /gallery` — **publieke** pagina met alle video's gegroepeerd per (sub)map,
+    met thumbnails. Bewuste uitzondering op het "geen overzicht"-principe hieronder,
+    zodat video's ook zonder fotoboek aan mensen getoond kunnen worden.
+  - Elk ander pad geeft 404 — er is geen manier om de rauwe mappenstructuur op de NAS
+    te doorbladeren.
 - `Dockerfile` / `docker-compose.yml` — draait de server als container. `BASE_URL`
   en volumes (video's + data) worden via `docker-compose.yml` ingesteld.
 - Publicatie loopt via een bestaande Cloudflare Tunnel naar een subdomain van
@@ -32,8 +45,10 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
 ## Beveiligingsmodel
 
 Geen wachtwoord, geen login. Beveiliging = niet-raadbare random ID's (16^10
-mogelijkheden) + geen enkele route die een overzicht of index toont. Voor een
+mogelijkheden) + geen route die de video's per ID laat doorbladeren. Voor een
 fotoboek-use-case is dat bewust voldoende; niet geschikt voor gevoeligere content.
+Uitzondering: `/gallery` is bewust wél publiek en toont een overzicht van alle
+video's met thumbnail, zodat ze ook los van het fotoboek getoond kunnen worden.
 
 ## CI/CD-pipeline
 

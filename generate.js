@@ -9,14 +9,48 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
 const QRCode = require("qrcode");
+
+const execFileAsync = promisify(execFile);
 
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const QR_DIR = path.join(DATA_DIR, "qrcodes");
+const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
+const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
+
+// Eerste frame als thumbnail (voor de galerij-pagina en als poster op de afspeelpagina).
+// 0.5s in plaats van 0s, want frame 0 is bij sommige video's zwart/leeg.
+async function generateThumbnail(inputPath, outputPath) {
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-ss", "0.5",
+    "-i", inputPath,
+    "-frames:v", "1",
+    "-vf", "scale=480:-2",
+    "-q:v", "4",
+    outputPath,
+  ]);
+}
+
+// Kopieert de video met de moov-atom vooraan ("faststart"), zodat de browser
+// direct kan beginnen met afspelen zonder eerst het hele bestand te downloaden.
+// Puur remuxen (geen her-encode), dus snel en zonder kwaliteitsverlies. Het
+// origineel in videos/ blijft ongewijzigd; dit is een aparte kopie in data/.
+async function generateStreamableCopy(inputPath, outputPath) {
+  await execFileAsync("ffmpeg", [
+    "-y",
+    "-i", inputPath,
+    "-c", "copy",
+    "-movflags", "+faststart",
+    outputPath,
+  ]);
+}
 
 function loadMapping() {
   if (fs.existsSync(MAPPING_FILE)) {
@@ -74,6 +108,8 @@ async function main() {
 
   const foundVideos = findVideos(VIDEOS_DIR);
   fs.mkdirSync(QR_DIR, { recursive: true });
+  fs.mkdirSync(THUMB_DIR, { recursive: true });
+  fs.mkdirSync(STREAM_DIR, { recursive: true });
 
   let newCount = 0;
 
@@ -107,6 +143,28 @@ async function main() {
       const url = `${BASE_URL}/v?id=${id}`;
       await QRCode.toFile(qrPath, url, { width: 600, margin: 2 });
       console.log(`QR gemaakt:  ${path.basename(qrPath)}`);
+    }
+
+    const sourcePath = path.join(VIDEOS_DIR, relativePath);
+    const thumbPath = path.join(THUMB_DIR, `${id}.jpg`);
+    const streamPath = path.join(STREAM_DIR, `${id}.mp4`);
+
+    if (!fs.existsSync(thumbPath)) {
+      try {
+        await generateThumbnail(sourcePath, thumbPath);
+        console.log(`Thumbnail gemaakt: ${id}.jpg`);
+      } catch (err) {
+        console.warn(`Kon geen thumbnail maken voor ${relativePath}: ${err.message}`);
+      }
+    }
+
+    if (!fs.existsSync(streamPath)) {
+      try {
+        await generateStreamableCopy(sourcePath, streamPath);
+        console.log(`Streamable kopie gemaakt: ${id}.mp4`);
+      } catch (err) {
+        console.warn(`Kon geen streamable kopie maken voor ${relativePath}: ${err.message}`);
+      }
     }
   }
 

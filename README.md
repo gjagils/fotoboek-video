@@ -11,7 +11,8 @@ smartphone af in de browser — zonder app te hoeven installeren.
   Bestaande ID's blijven altijd hetzelfde, ook als je het script opnieuw draait.
 - `server.js` — de webserver. `/v?id=<id>` toont een simpele afspeelpagina,
   `/video/<id>` levert het videobestand (met Range-support, nodig om te kunnen spoelen
-  op mobiel). Er is geen enkele route die de videomap toont — alleen bekende ID's werken.
+  op mobiel). Bekende ID's zijn nodig om een video te bekijken; alleen `/gallery` is
+  een publiek overzicht (zie hieronder).
 
 ## Installatie op de Synology
 
@@ -69,8 +70,32 @@ altijd een witte achtergrond.
 - Comprimeer grote bestanden (bv. met HandBrake) — kleinere bestanden laden sneller
   wanneer iemand net de QR-code gescand heeft.
 
+## Galerij-pagina
+
+`/gallery` toont alle video's gegroepeerd per (sub)map, met een thumbnail van het
+eerste frame, zodat je ze ook zonder fotoboek aan mensen kunt laten zien. Deze
+pagina is publiek (geen ID nodig) — deel de link dus alleen met wie de video's mag
+zien.
+
+## Snellere laadtijd
+
+`generate.js` maakt per video, naast de QR-code, ook automatisch (via ffmpeg):
+
+- een **thumbnail** (`data/thumbnails/<id>.jpg`) van het eerste frame — gebruikt
+  als `poster` op de afspeelpagina en op `/gallery`, zodat er meteen een beeld
+  staat terwijl de video nog laadt.
+- een **streamable kopie** (`data/streamable/<id>.mp4`) met de moov-atom vooraan
+  ("faststart"). Veel telefoonopnames hebben die metadata juist aan het eínd van
+  het bestand staan, waardoor de browser eerst (bijna) het hele bestand moet
+  downloaden voordat 'ie kan beginnen met afspelen. De streamable kopie lost dat
+  op zonder opnieuw te coderen (dus snel, geen kwaliteitsverlies) en wordt
+  automatisch gebruikt door `/video/<id>` als 'ie bestaat. Het origineel in
+  `videos/` blijft ongewijzigd.
+
 ## Beveiliging
 
 De ID's zijn random 10-tekens hex-strings (dus 16^10 mogelijkheden) — niet te raden,
-en er is geen manier om de lijst met video's te doorbladeren. Voor een fotoboek is dit
-ruim voldoende; een wachtwoord is niet nodig en zou het scannen alleen maar lastiger maken.
+en er is geen route die de video's per ID laat doorbladeren. Voor een fotoboek is dit
+ruim voldoende; een wachtwoord is niet nodig en zou het scannen alleen maar lastiger
+maken. De galerij op `/gallery` is een bewuste uitzondering: die is publiek en toont
+wél een overzicht van alle video's.
