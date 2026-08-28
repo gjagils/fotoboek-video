@@ -21,6 +21,7 @@ const QR_DIR = path.join(DATA_DIR, "qrcodes");
 const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
 const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
+const SOURCE_STATE_FILE = path.join(DATA_DIR, "source-state.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 
@@ -52,6 +53,18 @@ async function generateStreamableCopy(inputPath, outputPath) {
   ]);
 }
 
+async function generateAtomically(generator, inputPath, outputPath) {
+  const extension = path.extname(outputPath);
+  const temporaryPath = `${outputPath.slice(0, -extension.length)}.tmp-${process.pid}-${crypto.randomBytes(4).toString("hex")}${extension}`;
+
+  try {
+    await generator(inputPath, temporaryPath);
+    fs.renameSync(temporaryPath, outputPath);
+  } finally {
+    if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+  }
+}
+
 function loadMapping() {
   if (fs.existsSync(MAPPING_FILE)) {
     return JSON.parse(fs.readFileSync(MAPPING_FILE, "utf8"));
@@ -62,6 +75,34 @@ function loadMapping() {
 function saveMapping(mapping) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(MAPPING_FILE, JSON.stringify(mapping, null, 2));
+}
+
+function loadSourceState() {
+  if (fs.existsSync(SOURCE_STATE_FILE)) {
+    return JSON.parse(fs.readFileSync(SOURCE_STATE_FILE, "utf8"));
+  }
+  return {};
+}
+
+function saveSourceState(sourceState) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(SOURCE_STATE_FILE, JSON.stringify(sourceState, null, 2));
+}
+
+function sourceSignature(filePath) {
+  const stats = fs.statSync(filePath);
+  return { size: stats.size, mtimeMs: stats.mtimeMs };
+}
+
+function signaturesEqual(left, right) {
+  return left && left.size === right.size && left.mtimeMs === right.mtimeMs;
+}
+
+function removeIfExists(filePath, label) {
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+    console.log(`${label} verwijderd: ${path.basename(filePath)}`);
+  }
 }
 
 // Loopt recursief door een map en geeft alle videobestanden terug,
@@ -104,19 +145,41 @@ async function main() {
   }
 
   const mapping = loadMapping(); // { id: "relatief/pad.mp4" }
+  const sourceState = loadSourceState(); // { id: { size, mtimeMs } }
   const pathToId = new Map(Object.entries(mapping).map(([id, p]) => [p, id]));
 
   const foundVideos = findVideos(VIDEOS_DIR);
+  const foundVideoSet = new Set(foundVideos);
   fs.mkdirSync(QR_DIR, { recursive: true });
   fs.mkdirSync(THUMB_DIR, { recursive: true });
   fs.mkdirSync(STREAM_DIR, { recursive: true });
 
   let newCount = 0;
+  let updatedCount = 0;
+  let removedCount = 0;
+
+  // Verwijder video's die niet meer in de bronmap staan ook uit de index en
+  // ruim alle afgeleide bestanden op. Daardoor verdwijnen ze uit /gallery en
+  // werken hun oude afspeellinks niet meer.
+  for (const [id, relativePath] of Object.entries(mapping)) {
+    if (foundVideoSet.has(relativePath)) continue;
+
+    removeIfExists(path.join(QR_DIR, qrFileName(relativePath, id)), "QR");
+    removeIfExists(path.join(QR_DIR, `${id}.png`), "QR");
+    removeIfExists(path.join(THUMB_DIR, `${id}.jpg`), "Thumbnail");
+    removeIfExists(path.join(STREAM_DIR, `${id}.mp4`), "Streamable kopie");
+    delete mapping[id];
+    delete sourceState[id];
+    pathToId.delete(relativePath);
+    removedCount++;
+    console.log(`Verwijderd uit mapping: ${relativePath}  (id=${id})`);
+  }
 
   for (const relativePath of foundVideos) {
     let id = pathToId.get(relativePath);
+    const isNew = !id;
 
-    if (!id) {
+    if (isNew) {
       // Nieuw bestand: nieuw random ID, uniek t.o.v. bestaande ID's
       do {
         id = generateId();
@@ -148,35 +211,43 @@ async function main() {
     const sourcePath = path.join(VIDEOS_DIR, relativePath);
     const thumbPath = path.join(THUMB_DIR, `${id}.jpg`);
     const streamPath = path.join(STREAM_DIR, `${id}.mp4`);
+    const signature = sourceSignature(sourcePath);
+    // Een bestaande video zonder status komt van vóór deze wijzigingsdetectie;
+    // ververs hem één keer zodat we zeker weten dat de afgeleide bestanden actueel zijn.
+    const sourceChanged = !isNew && !signaturesEqual(sourceState[id], signature);
+    let generationSucceeded = true;
 
-    if (!fs.existsSync(thumbPath)) {
+    if (sourceChanged) {
+      updatedCount++;
+      console.log(`Gewijzigd: ${relativePath}  ->  afgeleide bestanden verversen`);
+    }
+
+    if (sourceChanged || !fs.existsSync(thumbPath)) {
       try {
-        await generateThumbnail(sourcePath, thumbPath);
-        console.log(`Thumbnail gemaakt: ${id}.jpg`);
+        await generateAtomically(generateThumbnail, sourcePath, thumbPath);
+        console.log(`Thumbnail ${sourceChanged ? "ververst" : "gemaakt"}: ${id}.jpg`);
       } catch (err) {
+        generationSucceeded = false;
         console.warn(`Kon geen thumbnail maken voor ${relativePath}: ${err.message}`);
       }
     }
 
-    if (!fs.existsSync(streamPath)) {
+    if (sourceChanged || !fs.existsSync(streamPath)) {
       try {
-        await generateStreamableCopy(sourcePath, streamPath);
-        console.log(`Streamable kopie gemaakt: ${id}.mp4`);
+        await generateAtomically(generateStreamableCopy, sourcePath, streamPath);
+        console.log(`Streamable kopie ${sourceChanged ? "ververst" : "gemaakt"}: ${id}.mp4`);
       } catch (err) {
+        generationSucceeded = false;
         console.warn(`Kon geen streamable kopie maken voor ${relativePath}: ${err.message}`);
       }
     }
-  }
 
-  // Waarschuw voor mapping-entries waarvan het bestand niet meer bestaat
-  for (const [id, relativePath] of Object.entries(mapping)) {
-    if (!foundVideos.includes(relativePath)) {
-      console.warn(`Let op: mapping voor id=${id} verwijst naar ontbrekend bestand "${relativePath}"`);
-    }
+    if (generationSucceeded) sourceState[id] = signature;
   }
 
   saveMapping(mapping);
-  console.log(`\nKlaar. ${newCount} nieuw(e) video('s), ${foundVideos.length} totaal.`);
+  saveSourceState(sourceState);
+  console.log(`\nKlaar. ${newCount} nieuw, ${updatedCount} ververst, ${removedCount} verwijderd, ${foundVideos.length} totaal.`);
   console.log(`Mapping: ${MAPPING_FILE}`);
   console.log(`QR-codes: ${QR_DIR}`);
 }

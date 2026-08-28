@@ -653,7 +653,9 @@ app.get("/video/:id", (req, res) => {
     return;
   }
 
-  res.set("Cache-Control", "public, max-age=31536000, immutable");
+  // Dezelfde ID blijft behouden als een bronvideo wordt vervangen. Laat de
+  // browser daarom hervalideren, zodat een vernieuwde kopie zichtbaar wordt.
+  res.set("Cache-Control", "public, max-age=0, must-revalidate");
   res.sendFile(absolutePath, (err) => {
     if (err && !res.headersSent) {
       res.status(404).send("Video niet gevonden.");
@@ -678,7 +680,7 @@ app.get("/thumb/:id", (req, res) => {
     return;
   }
 
-  res.set("Cache-Control", "public, max-age=31536000, immutable");
+  res.set("Cache-Control", "public, max-age=0, must-revalidate");
   res.sendFile(thumbPath);
 });
 

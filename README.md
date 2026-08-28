@@ -7,8 +7,9 @@ smartphone af in de browser — zonder app te hoeven installeren.
 
 - `videos/` — hier zet je je mp4's neer. Submappen mogen (bv. `videos/thailand/strand.mp4`).
 - `generate.js` — scant `videos/` recursief, geeft nieuwe bestanden een random ID, en
-  genereert per video een QR-code (in `data/qrcodes/`) die naar `BASE_URL/v?id=<id>` wijst.
-  Bestaande ID's blijven altijd hetzelfde, ook als je het script opnieuw draait.
+  genereert per video een QR-code, thumbnail en voor streaming geoptimaliseerde kopie.
+  Bestaande ID's blijven hetzelfde. Gewijzigde video's krijgen automatisch nieuwe
+  afgeleide bestanden; verwijderde video's worden uit de mapping en galerij verwijderd.
 - `server.js` — de webserver. `/v?id=<id>` toont een simpele afspeelpagina,
   `/video/<id>` levert het videobestand (met Range-support, nodig om te kunnen spoelen
   op mobiel). Bekende ID's zijn nodig om een video te bekijken; alleen `/gallery` is
