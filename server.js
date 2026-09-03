@@ -722,9 +722,9 @@ app.get("/gallery", (req, res) => {
     body { max-width: 960px; margin: 40px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
     h1 { margin-bottom: 4px; }
     h2 { margin-top: 40px; text-transform: capitalize; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
-    .card { display: flex; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
-    .card img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 10px; background: #e5e7eb; }
+    .grid { columns: 4 150px; column-gap: 16px; }
+    .card { display: inline-flex; width: 100%; margin-bottom: 16px; break-inside: avoid; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
+    .card img { display: block; width: 100%; height: auto; border-radius: 10px; background: #e5e7eb; }
     .card span { font-size: 14px; overflow-wrap: anywhere; }
     .empty { margin-top: 32px; color: #6b7280; }
   </style>
