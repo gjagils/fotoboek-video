@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile);
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const QR_DIR = path.join(DATA_DIR, "qrcodes");
+const FOLDER_QR_DIR = path.join(DATA_DIR, "folder-qrcodes");
 const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
 const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
@@ -138,6 +139,18 @@ function qrFileName(relativePath, id) {
   return `${readableName}--${id}.png`;
 }
 
+function folderQrFileName(folder) {
+  const readableName = folder
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 100) || "map";
+  const suffix = crypto.createHash("sha256").update(folder).digest("hex").slice(0, 8);
+  return `${readableName}--${suffix}.png`;
+}
+
 async function main() {
   if (!fs.existsSync(VIDEOS_DIR)) {
     console.error(`Videomap niet gevonden: ${VIDEOS_DIR}`);
@@ -151,6 +164,7 @@ async function main() {
   const foundVideos = findVideos(VIDEOS_DIR);
   const foundVideoSet = new Set(foundVideos);
   fs.mkdirSync(QR_DIR, { recursive: true });
+  fs.mkdirSync(FOLDER_QR_DIR, { recursive: true });
   fs.mkdirSync(THUMB_DIR, { recursive: true });
   fs.mkdirSync(STREAM_DIR, { recursive: true });
 
@@ -245,11 +259,33 @@ async function main() {
     if (generationSucceeded) sourceState[id] = signature;
   }
 
+  // Maak één deelbare galerij-QR per echte submap. De queryparameter behoudt
+  // ook spaties, accenten en geneste mapnamen correct via URL-encoding.
+  const folders = new Set(foundVideos.map((relativePath) => path.dirname(relativePath)).filter((folder) => folder !== "."));
+  const expectedFolderQrFiles = new Set();
+  for (const folder of [...folders].sort((left, right) => left.localeCompare(right, "nl"))) {
+    const fileName = folderQrFileName(folder);
+    expectedFolderQrFiles.add(fileName);
+    const outputPath = path.join(FOLDER_QR_DIR, fileName);
+    if (!fs.existsSync(outputPath)) {
+      const url = `${BASE_URL}/gallery?folder=${encodeURIComponent(folder)}`;
+      await QRCode.toFile(outputPath, url, { width: 600, margin: 2 });
+      console.log(`Map-QR gemaakt: ${folder} -> ${fileName}`);
+    }
+  }
+
+  for (const fileName of fs.readdirSync(FOLDER_QR_DIR)) {
+    if (fileName.endsWith(".png") && !expectedFolderQrFiles.has(fileName)) {
+      removeIfExists(path.join(FOLDER_QR_DIR, fileName), "Map-QR");
+    }
+  }
+
   saveMapping(mapping);
   saveSourceState(sourceState);
   console.log(`\nKlaar. ${newCount} nieuw, ${updatedCount} ververst, ${removedCount} verwijderd, ${foundVideos.length} totaal.`);
   console.log(`Mapping: ${MAPPING_FILE}`);
   console.log(`QR-codes: ${QR_DIR}`);
+  console.log(`Map-QR-codes: ${FOLDER_QR_DIR}`);
 }
 
 main().catch((err) => {

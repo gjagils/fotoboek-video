@@ -15,6 +15,7 @@ const QRCode = require("qrcode");
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const QR_DIR = path.join(DATA_DIR, "qrcodes");
+const FOLDER_QR_DIR = path.join(DATA_DIR, "folder-qrcodes");
 const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
 const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
@@ -77,9 +78,48 @@ function qrDownloadFileName(relativePath, id) {
   return `${readableName}--${id}.png`;
 }
 
+function folderQrFileName(folder) {
+  const readableName = folder
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 100) || "map";
+  const suffix = crypto.createHash("sha256").update(folder).digest("hex").slice(0, 8);
+  return `${readableName}--${suffix}.png`;
+}
+
+function mappedFolders(mapping) {
+  return [...new Set(Object.values(mapping)
+    .map((relativePath) => path.dirname(relativePath))
+    .filter((folder) => folder !== "."))]
+    .sort((left, right) => left.localeCompare(right, "nl"));
+}
+
 function adminPage(result = "") {
   const resultHtml = result ? `<pre>${escapeHtml(result)}</pre>` : "";
-  const videos = Object.entries(loadMapping()).sort((left, right) => left[1].localeCompare(right[1], "nl"));
+  const mapping = loadMapping();
+  const videos = Object.entries(mapping).sort((left, right) => left[1].localeCompare(right[1], "nl"));
+  const folders = mappedFolders(mapping);
+  const foldersHtml = folders.length
+    ? `<section>
+        <h2>Vakantie-albums</h2>
+        <div class="videos">
+          ${folders.map((folder) => {
+            const url = `${BASE_URL}/gallery?folder=${encodeURIComponent(folder)}`;
+            return `<article>
+              <strong>${escapeHtml(folder)}</strong>
+              <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
+              <div class="actions">
+                <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
+                <a class="button secondary" href="/admin/folder-qr?folder=${encodeURIComponent(folder)}">Download QR</a>
+              </div>
+            </article>`;
+          }).join("")}
+        </div>
+      </section>`
+    : "";
   const videosHtml = videos.length
     ? `<section>
         <h2>Videolinks</h2>
@@ -188,6 +228,7 @@ function adminPage(result = "") {
       </div>
     </div>
   </section>
+  ${foldersHtml}
   ${videosHtml}
   <script>
     const canvas = document.getElementById("qr-canvas");
@@ -560,6 +601,25 @@ app.get("/admin/qr/:id", requireAdmin, (req, res) => {
   res.download(path.join(QR_DIR, qrFileName), qrDownloadFileName(mapping[id], id));
 });
 
+app.get("/admin/folder-qr", requireAdmin, (req, res) => {
+  const folder = typeof req.query.folder === "string" ? req.query.folder : "";
+  const mapping = loadMapping();
+
+  if (!mappedFolders(mapping).includes(folder)) {
+    res.status(404).send("Map-QR-code niet gevonden.");
+    return;
+  }
+
+  const fileName = folderQrFileName(folder);
+  const absolutePath = path.join(FOLDER_QR_DIR, fileName);
+  if (!fs.existsSync(absolutePath)) {
+    res.status(404).send("Map-QR-code niet gevonden. Draai eerst de generator.");
+    return;
+  }
+
+  res.download(absolutePath, fileName);
+});
+
 app.post("/admin/generate", requireAdmin, (req, res) => {
   if (generationInProgress) {
     res.status(409).type("html").send(adminPage("Er draait al een scan. Probeer het straks opnieuw."));
@@ -688,7 +748,17 @@ app.get("/thumb/:id", (req, res) => {
 // zodat je ze ook aan mensen kunt laten zien zonder het fotoboek erbij.
 app.get("/gallery", (req, res) => {
   const mapping = loadMapping();
-  const entries = Object.entries(mapping).sort((left, right) => left[1].localeCompare(right[1], "nl"));
+  const requestedFolder = typeof req.query.folder === "string" ? req.query.folder : null;
+  const folders = mappedFolders(mapping);
+
+  if (requestedFolder !== null && !folders.includes(requestedFolder)) {
+    res.status(404).send("Vakantie-album niet gevonden.");
+    return;
+  }
+
+  const entries = Object.entries(mapping)
+    .filter(([, relativePath]) => requestedFolder === null || path.dirname(relativePath) === requestedFolder)
+    .sort((left, right) => left[1].localeCompare(right[1], "nl"));
 
   const groups = new Map();
   for (const [id, relativePath] of entries) {
@@ -701,7 +771,11 @@ app.get("/gallery", (req, res) => {
   const sectionsHtml = groups.size
     ? [...groups.entries()].map(([folderName, videos]) => `
       <section>
-        <h2>${escapeHtml(folderName)}</h2>
+        ${requestedFolder !== null
+          ? ""
+          : folderName === "Overig"
+            ? `<h2>${escapeHtml(folderName)}</h2>`
+            : `<h2><a href="/gallery?folder=${encodeURIComponent(folderName)}">${escapeHtml(folderName)}</a></h2>`}
         <div class="grid">
           ${videos.map(({ id, name }) => `
             <a class="card" href="/v?id=${encodeURIComponent(id)}">
@@ -717,11 +791,14 @@ app.get("/gallery", (req, res) => {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Video's</title>
+  <title>${requestedFolder === null ? "Video's" : escapeHtml(requestedFolder)}</title>
   <style>
     body { max-width: 960px; margin: 40px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
     h1 { margin-bottom: 4px; }
     h2 { margin-top: 40px; text-transform: capitalize; }
+    h2 a { color: inherit; text-decoration: none; }
+    h2 a:hover { text-decoration: underline; }
+    .back { display: inline-block; margin-bottom: 12px; color: #1d4ed8; }
     .grid { columns: 4 150px; column-gap: 16px; }
     .card { display: inline-flex; width: 100%; margin-bottom: 16px; break-inside: avoid; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
     .card img { display: block; width: 100%; height: auto; border-radius: 10px; background: #e5e7eb; }
@@ -730,7 +807,8 @@ app.get("/gallery", (req, res) => {
   </style>
 </head>
 <body>
-  <h1>Video's</h1>
+  ${requestedFolder === null ? "" : `<a class="back" href="/gallery">← Alle vakanties</a>`}
+  <h1>${requestedFolder === null ? "Video's" : escapeHtml(requestedFolder)}</h1>
   ${sectionsHtml}
 </body>
 </html>`);

@@ -4,5 +4,6 @@ videos/
 data/mapping.json
 data/source-state.json
 data/qrcodes/
+data/folder-qrcodes/
 data/thumbnails/
 data/streamable/

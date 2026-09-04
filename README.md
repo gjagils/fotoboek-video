@@ -37,6 +37,8 @@ smartphone af in de browser — zonder app te hoeven installeren.
    **Video's scannen en QR-codes genereren**. Daarna kun je per video de link
    openen, met **Kopieer link** rechtstreeks voor WhatsApp kopiëren of met
    **Download QR** de bijbehorende PNG downloaden.
+   Onder **Vakantie-albums** staat daarnaast voor elke submap een eigen galerijlink
+   met **Kopieer link** en **Download QR**.
    De WhatsApp-linkpreview gebruikt automatisch de videobestandsnaam als titel.
 
 Als alternatief kan het generate-script vanuit de container worden gestart:
@@ -77,6 +79,11 @@ altijd een witte achtergrond.
 eerste frame, zodat je ze ook zonder fotoboek aan mensen kunt laten zien. Deze
 pagina is publiek (geen ID nodig) — deel de link dus alleen met wie de video's mag
 zien.
+
+Elke submap heeft ook een eigen publieke vakantiepagina, bijvoorbeeld
+`/gallery?folder=thailand`. Bij iedere scan wordt daarvoor automatisch een QR-code
+in `data/folder-qrcodes/` gemaakt. Nieuwe mappen verschijnen vanzelf; als de laatste
+video uit een map verdwijnt, wordt ook de bijbehorende map-QR verwijderd.
 
 ## Snellere laadtijd
 
