@@ -19,11 +19,13 @@ const FOLDER_QR_DIR = path.join(DATA_DIR, "folder-qrcodes");
 const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
 const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
+const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const PORT = process.env.PORT || 3000;
 const BASE_URL = (process.env.BASE_URL || "https://albumvideo.gerdjan.nl").replace(/\/$/, "");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
 const app = express();
+app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 let generationInProgress = false;
 
 function safeEqual(left, right) {
@@ -97,17 +99,59 @@ function mappedFolders(mapping) {
     .sort((left, right) => left.localeCompare(right, "nl"));
 }
 
+function loadGallerySettings() {
+  if (!fs.existsSync(GALLERY_SETTINGS_FILE)) return {};
+  return JSON.parse(fs.readFileSync(GALLERY_SETTINGS_FILE, "utf8"));
+}
+
+function saveGallerySettings(settings) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(GALLERY_SETTINGS_FILE, JSON.stringify(settings, null, 2));
+}
+
+function defaultGallerySettings(folder) {
+  const isThailand = folder.toLocaleLowerCase("nl") === "thailand";
+  return {
+    theme: isThailand ? "thailand" : "default",
+    title: isThailand ? "ONZE THAILAND FILMS" : folder,
+    subtitle: isThailand ? "THAILAND · VERDONK & VAN GILS · 2026" : "",
+  };
+}
+
+function displayVideoTitle(relativePath) {
+  let title = path.parse(relativePath).name
+    .replace(/\(\s*\d+\s*\)/g, " ")
+    .replace(/compleet[\s_-]*9\s*[x×]\s*16/gi, " ")
+    .replace(/\bcompleet\b/gi, " ")
+    .replace(/[_-]+/g, " ")
+    .replace(/^thailand\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const normalized = title.toLocaleLowerCase("nl");
+  const preferredTitles = {
+    "river kwai 2": "The River Kwai",
+    "river kwai": "The River Kwai",
+    "fietsen bangkok": "Fietsen in Bangkok",
+    "santichon schommel": "Santichon Village — Schommel",
+  };
+  if (preferredTitles[normalized]) return preferredTitles[normalized];
+  return title ? title.charAt(0).toLocaleUpperCase("nl") + title.slice(1) : "Video";
+}
+
 function adminPage(result = "") {
   const resultHtml = result ? `<pre>${escapeHtml(result)}</pre>` : "";
   const mapping = loadMapping();
   const videos = Object.entries(mapping).sort((left, right) => left[1].localeCompare(right[1], "nl"));
   const folders = mappedFolders(mapping);
+  const gallerySettings = loadGallerySettings();
   const foldersHtml = folders.length
     ? `<section>
         <h2>Vakantie-albums</h2>
         <div class="videos">
           ${folders.map((folder) => {
             const url = `${BASE_URL}/gallery?folder=${encodeURIComponent(folder)}`;
+            const settings = { ...defaultGallerySettings(folder), ...gallerySettings[folder] };
             return `<article>
               <strong>${escapeHtml(folder)}</strong>
               <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
@@ -115,6 +159,22 @@ function adminPage(result = "") {
                 <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
                 <a class="button secondary" href="/admin/folder-qr?folder=${encodeURIComponent(folder)}">Download QR</a>
               </div>
+              <form class="album-settings" method="post" action="/admin/gallery-settings">
+                <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
+                <label>Vormgeving
+                  <select name="theme">
+                    <option value="default"${settings.theme === "default" ? " selected" : ""}>Standaard</option>
+                    <option value="thailand"${settings.theme === "thailand" ? " selected" : ""}>Thailand-reisdagboek</option>
+                  </select>
+                </label>
+                <label>Paginatitel
+                  <input name="title" maxlength="80" value="${escapeHtml(settings.title)}" />
+                </label>
+                <label>Subtitel
+                  <input name="subtitle" maxlength="120" value="${escapeHtml(settings.subtitle)}" />
+                </label>
+                <button type="submit">Instellingen opslaan</button>
+              </form>
             </article>`;
           }).join("")}
         </div>
@@ -172,6 +232,9 @@ function adminPage(result = "") {
     article strong, article > a { overflow-wrap: anywhere; }
     article > a { color: #1d4ed8; }
     article .actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; gap: 8px; }
+    .album-settings { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed #d1d5db; }
+    .album-settings label { font-size: 13px; }
+    .album-settings button { white-space: nowrap; }
     .empty { margin-top: 32px; color: #6b7280; }
     @media (max-width: 600px) {
       .studio { padding: 18px; }
@@ -179,6 +242,7 @@ function adminPage(result = "") {
       .preview-shell { max-width: 320px; }
       article { grid-template-columns: 1fr; }
       article .actions { grid-column: 1; grid-row: auto; justify-self: start; flex-wrap: wrap; }
+      .album-settings { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -620,6 +684,24 @@ app.get("/admin/folder-qr", requireAdmin, (req, res) => {
   res.download(absolutePath, fileName);
 });
 
+app.post("/admin/gallery-settings", requireAdmin, (req, res) => {
+  const folder = String(req.body.folder || "");
+  const theme = String(req.body.theme || "default");
+  const title = String(req.body.title || "").trim().slice(0, 80);
+  const subtitle = String(req.body.subtitle || "").trim().slice(0, 120);
+  const mapping = loadMapping();
+
+  if (!mappedFolders(mapping).includes(folder) || !["default", "thailand"].includes(theme)) {
+    res.status(400).type("html").send(adminPage("Ongeldige vakantie-instellingen."));
+    return;
+  }
+
+  const settings = loadGallerySettings();
+  settings[folder] = { theme, title: title || folder, subtitle };
+  saveGallerySettings(settings);
+  res.status(200).type("html").send(adminPage(`Instellingen voor ${folder} opgeslagen.`));
+});
+
 app.post("/admin/generate", requireAdmin, (req, res) => {
   if (generationInProgress) {
     res.status(409).type("html").send(adminPage("Er draait al een scan. Probeer het straks opnieuw."));
@@ -744,6 +826,16 @@ app.get("/thumb/:id", (req, res) => {
   res.sendFile(thumbPath);
 });
 
+app.get("/thailand-films.css", (req, res) => {
+  res.set("Cache-Control", "public, max-age=3600");
+  res.sendFile(path.join(__dirname, "thailand-films.css"));
+});
+
+app.use("/assets", express.static(path.join(__dirname, "assets"), {
+  fallthrough: false,
+  maxAge: "1h",
+}));
+
 // Publieke galerij: overzicht van alle video's per map, met thumbnails,
 // zodat je ze ook aan mensen kunt laten zien zonder het fotoboek erbij.
 app.get("/gallery", (req, res) => {
@@ -765,7 +857,57 @@ app.get("/gallery", (req, res) => {
     const folder = path.dirname(relativePath);
     const folderName = folder === "." ? "Overig" : folder;
     if (!groups.has(folderName)) groups.set(folderName, []);
-    groups.get(folderName).push({ id, name: path.parse(relativePath).name });
+    groups.get(folderName).push({ id, name: displayVideoTitle(relativePath) });
+  }
+
+  const storedSettings = loadGallerySettings();
+  const activeSettings = requestedFolder === null
+    ? null
+    : { ...defaultGallerySettings(requestedFolder), ...storedSettings[requestedFolder] };
+  const pageTitle = activeSettings?.title || "Video's";
+
+  if (activeSettings?.theme === "thailand") {
+    const videos = groups.get(requestedFolder) || [];
+    const cardsHtml = videos.map(({ id, name }) => `
+      <article class="film-card">
+        <a class="film-card__link" href="/v?id=${encodeURIComponent(id)}" aria-label="Bekijk ${escapeHtml(name)}">
+          <div class="film-card__image-wrap">
+            <img src="/thumb/${encodeURIComponent(id)}" alt="${escapeHtml(name)}" loading="lazy" />
+            <span class="film-card__play" aria-hidden="true"><span></span></span>
+          </div>
+          <h2><span class="film-card__icon" aria-hidden="true">▶</span> ${escapeHtml(name)}</h2>
+        </a>
+      </article>`).join("");
+
+    res.status(200).type("html").send(`<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="${escapeHtml(activeSettings.subtitle || activeSettings.title)}" />
+  <title>${escapeHtml(activeSettings.title)}</title>
+  <link rel="stylesheet" href="/thailand-films.css" />
+</head>
+<body>
+  <header class="travel-hero">
+    <img class="travel-hero__art" src="/assets/thailand-header-decoration.svg" alt="" aria-hidden="true" />
+    <div class="travel-hero__title-strip">
+      <p class="travel-hero__eyebrow">Reisfilmarchief · Zuidoost-Azië</p>
+      <h1>${escapeHtml(activeSettings.title)}</h1>
+      ${activeSettings.subtitle ? `<p class="travel-hero__subtitle">${escapeHtml(activeSettings.subtitle)}</p>` : ""}
+    </div>
+  </header>
+  <main class="travel-main">
+    <a class="travel-back" href="/gallery">← Alle vakanties</a>
+    <section aria-labelledby="vacation-label">
+      <div class="section-label" id="vacation-label"><span aria-hidden="true">✦</span> ${escapeHtml(requestedFolder)} <span aria-hidden="true">✦</span></div>
+      <div class="film-grid">${cardsHtml}</div>
+    </section>
+  </main>
+  <footer class="travel-footer"><p>${escapeHtml(activeSettings.subtitle || requestedFolder)}</p></footer>
+</body>
+</html>`);
+    return;
   }
 
   const sectionsHtml = groups.size
@@ -791,7 +933,7 @@ app.get("/gallery", (req, res) => {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${requestedFolder === null ? "Video's" : escapeHtml(requestedFolder)}</title>
+  <title>${escapeHtml(pageTitle)}</title>
   <style>
     body { max-width: 960px; margin: 40px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
     h1 { margin-bottom: 4px; }
@@ -799,6 +941,7 @@ app.get("/gallery", (req, res) => {
     h2 a { color: inherit; text-decoration: none; }
     h2 a:hover { text-decoration: underline; }
     .back { display: inline-block; margin-bottom: 12px; color: #1d4ed8; }
+    .subtitle { margin: 4px 0 28px; color: #6b7280; }
     .grid { columns: 4 150px; column-gap: 16px; }
     .card { display: inline-flex; width: 100%; margin-bottom: 16px; break-inside: avoid; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
     .card img { display: block; width: 100%; height: auto; border-radius: 10px; background: #e5e7eb; }
@@ -808,7 +951,8 @@ app.get("/gallery", (req, res) => {
 </head>
 <body>
   ${requestedFolder === null ? "" : `<a class="back" href="/gallery">← Alle vakanties</a>`}
-  <h1>${requestedFolder === null ? "Video's" : escapeHtml(requestedFolder)}</h1>
+  <h1>${escapeHtml(pageTitle)}</h1>
+  ${activeSettings?.subtitle ? `<p class="subtitle">${escapeHtml(activeSettings.subtitle)}</p>` : ""}
   ${sectionsHtml}
 </body>
 </html>`);

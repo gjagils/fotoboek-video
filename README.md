@@ -38,7 +38,9 @@ smartphone af in de browser — zonder app te hoeven installeren.
    openen, met **Kopieer link** rechtstreeks voor WhatsApp kopiëren of met
    **Download QR** de bijbehorende PNG downloaden.
    Onder **Vakantie-albums** staat daarnaast voor elke submap een eigen galerijlink
-   met **Kopieer link** en **Download QR**.
+   met **Kopieer link** en **Download QR**. Daar stel je per vakantie ook de
+   vormgeving, paginatitel en subtitel in. Deze instellingen blijven bewaard in
+   `data/gallery-settings.json`.
    De WhatsApp-linkpreview gebruikt automatisch de videobestandsnaam als titel.
 
 Als alternatief kan het generate-script vanuit de container worden gestart:
@@ -84,6 +86,24 @@ Elke submap heeft ook een eigen publieke vakantiepagina, bijvoorbeeld
 `/gallery?folder=thailand`. Bij iedere scan wordt daarvoor automatisch een QR-code
 in `data/folder-qrcodes/` gemaakt. Nieuwe mappen verschijnen vanzelf; als de laatste
 video uit een map verdwijnt, wordt ook de bijbehorende map-QR verwijderd.
+
+### Thailand-vormgeving (mock-up)
+
+De losse mock-up staat in `index.html`, met de vormgeving in
+`thailand-films.css` en lokale voorbeeldillustraties in `assets/`. Open
+`index.html` via een lokale webserver om hem te bekijken.
+
+Om een voorbeeldkaart te vervangen:
+
+1. Zet bij `href` de bestaande videolink (`/v?id=...`).
+2. Zet bij `img src` de bestaande thumbnail (`/thumb/<id>`).
+3. Vervang de zichtbare `<h2>` en `aria-label` door de leesbare videotitel.
+4. Laat `width`, `height` en de klasse `portrait`/`landscape` aansluiten op de
+   thumbnail. CSS vervormt of snijdt het beeld niet bij.
+
+De mock-up is ook aangesloten op de dynamische `/gallery?folder=thailand`.
+Thailand gebruikt standaard het reisdagboekthema; via `/admin` kan elke map
+afzonderlijk op **Standaard** of **Thailand-reisdagboek** worden gezet.
 
 ## Snellere laadtijd
 

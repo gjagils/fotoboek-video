@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 380" role="img" aria-label="">
+  <defs>
+    <pattern id="dots" width="10" height="10" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="2" fill="#f2e4c2" opacity=".5"/></pattern>
+  </defs>
+  <path fill="url(#dots)" d="M290 18h390v345H290z"/>
+  <path d="M480 27l-20 19 8 29-18 29 7 23-16 35 12 20-8 34 19 39-4 31 19 27 10 45 16-15 6-42 18-24-4-44 17-35-10-40 16-38-15-28 3-40-24-19-9-31z" fill="none" stroke="#f7e8bd" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity=".72"/>
+  <g fill="#dcae28" opacity=".92">
+    <path d="M607 244c-30-57-8-112 45-146-8 50-15 98-45 146z"/>
+    <path d="M611 246c21-63 61-88 84-95-13 45-37 78-84 95z"/>
+    <path d="M611 251c40-20 67-13 84-3-29 25-57 25-84 3z"/>
+  </g>
+  <g fill="none" stroke="#18251f" stroke-width="5" stroke-linecap="round" opacity=".62">
+    <path d="M606 245c25-45 51-73 77-90"/>
+    <path d="M621 230l-5 90"/>
+    <path d="M646 203l31 8M632 220l-3-34M662 181l23-4"/>
+  </g>
+  <path d="M350 306c58-31 122-38 191-20" fill="none" stroke="#ec2f74" stroke-width="17" stroke-linecap="round" opacity=".88"/>
+</svg>

@@ -23,6 +23,7 @@ const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
 const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const SOURCE_STATE_FILE = path.join(DATA_DIR, "source-state.json");
+const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 
@@ -277,6 +278,22 @@ async function main() {
   for (const fileName of fs.readdirSync(FOLDER_QR_DIR)) {
     if (fileName.endsWith(".png") && !expectedFolderQrFiles.has(fileName)) {
       removeIfExists(path.join(FOLDER_QR_DIR, fileName), "Map-QR");
+    }
+  }
+
+  // Verwijder ook opgeslagen vormgeving van mappen die niet meer bestaan.
+  if (fs.existsSync(GALLERY_SETTINGS_FILE)) {
+    const gallerySettings = JSON.parse(fs.readFileSync(GALLERY_SETTINGS_FILE, "utf8"));
+    let settingsChanged = false;
+    for (const folder of Object.keys(gallerySettings)) {
+      if (!folders.has(folder)) {
+        delete gallerySettings[folder];
+        settingsChanged = true;
+      }
+    }
+    if (settingsChanged) {
+      fs.writeFileSync(GALLERY_SETTINGS_FILE, JSON.stringify(gallerySettings, null, 2));
+      console.log("Instellingen van verwijderde vakantie-albums opgeruimd.");
     }
   }
 
