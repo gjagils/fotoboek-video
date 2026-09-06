@@ -26,17 +26,32 @@ const SOURCE_STATE_FILE = path.join(DATA_DIR, "source-state.json");
 const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
-const THUMBNAIL_VERSION = 2;
+const THUMBNAIL_VERSION = 3;
 
 // Eerste bruikbare, niet-zwarte frame als thumbnail. Sommige video's beginnen met
-// een zwarte fade die langer dan 0,5 seconde duurt. signalstats meet per frame de
-// gemiddelde helderheid; metadata select slaat vrijwel zwarte frames over.
+// een zwarte fade die langer dan 0,5 seconde duurt. Meet daarom eerst het zwarte
+// begin en pak een frame vlak na het einde daarvan.
 async function generateThumbnail(inputPath, outputPath) {
+  let thumbnailTime = 0.5;
+
+  const { stderr } = await execFileAsync("ffmpeg", [
+    "-hide_banner",
+    "-i", inputPath,
+    "-t", "15",
+    "-vf", "blackdetect=d=0.1:pix_th=0.10",
+    "-an",
+    "-f", "null",
+    "-",
+  ]);
+  const initialBlack = stderr.match(/black_start:0(?:\.0+)?\s+black_end:([0-9.]+)/);
+  if (initialBlack) thumbnailTime = Number(initialBlack[1]) + 0.1;
+
   await execFileAsync("ffmpeg", [
     "-y",
+    "-ss", String(thumbnailTime),
     "-i", inputPath,
     "-frames:v", "1",
-    "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=16:function=greater,scale=480:-2",
+    "-vf", "scale=480:-2",
     "-q:v", "4",
     outputPath,
   ]);
