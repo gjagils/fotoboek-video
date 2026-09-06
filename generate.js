@@ -26,16 +26,17 @@ const SOURCE_STATE_FILE = path.join(DATA_DIR, "source-state.json");
 const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
+const THUMBNAIL_VERSION = 2;
 
-// Eerste frame als thumbnail (voor de galerij-pagina en als poster op de afspeelpagina).
-// 0.5s in plaats van 0s, want frame 0 is bij sommige video's zwart/leeg.
+// Eerste bruikbare, niet-zwarte frame als thumbnail. Sommige video's beginnen met
+// een zwarte fade die langer dan 0,5 seconde duurt. signalstats meet per frame de
+// gemiddelde helderheid; metadata select slaat vrijwel zwarte frames over.
 async function generateThumbnail(inputPath, outputPath) {
   await execFileAsync("ffmpeg", [
     "-y",
-    "-ss", "0.5",
     "-i", inputPath,
     "-frames:v", "1",
-    "-vf", "scale=480:-2",
+    "-vf", "signalstats,metadata=select:key=lavfi.signalstats.YAVG:value=16:function=greater,scale=480:-2",
     "-q:v", "4",
     outputPath,
   ]);
@@ -230,6 +231,7 @@ async function main() {
     // Een bestaande video zonder status komt van vóór deze wijzigingsdetectie;
     // ververs hem één keer zodat we zeker weten dat de afgeleide bestanden actueel zijn.
     const sourceChanged = !isNew && !signaturesEqual(sourceState[id], signature);
+    const thumbnailOutdated = sourceState[id]?.thumbnailVersion !== THUMBNAIL_VERSION;
     let generationSucceeded = true;
 
     if (sourceChanged) {
@@ -237,10 +239,10 @@ async function main() {
       console.log(`Gewijzigd: ${relativePath}  ->  afgeleide bestanden verversen`);
     }
 
-    if (sourceChanged || !fs.existsSync(thumbPath)) {
+    if (sourceChanged || thumbnailOutdated || !fs.existsSync(thumbPath)) {
       try {
         await generateAtomically(generateThumbnail, sourcePath, thumbPath);
-        console.log(`Thumbnail ${sourceChanged ? "ververst" : "gemaakt"}: ${id}.jpg`);
+        console.log(`Thumbnail ${sourceChanged || thumbnailOutdated ? "ververst" : "gemaakt"}: ${id}.jpg`);
       } catch (err) {
         generationSucceeded = false;
         console.warn(`Kon geen thumbnail maken voor ${relativePath}: ${err.message}`);
@@ -257,7 +259,7 @@ async function main() {
       }
     }
 
-    if (generationSucceeded) sourceState[id] = signature;
+    if (generationSucceeded) sourceState[id] = { ...signature, thumbnailVersion: THUMBNAIL_VERSION };
   }
 
   // Maak één deelbare galerij-QR per echte submap. De queryparameter behoudt
