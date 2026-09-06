@@ -68,6 +68,17 @@ kan transparant of wit worden geëxporteerd; transparant is standaard. Gebruik
 voor Albelli bij voorkeur **Wit · Albelli veilig**. De JPG-reserve-export heeft
 altijd een witte achtergrond.
 
+Onder **Alle QR-kaarten downloaden** vul je per video de stadsnaam en activiteit
+in. De activiteit wordt alvast afgeleid van de bestandsnaam; controleer en pas die
+aan. Klik op **Download alle QR-kaarten (.zip)** voor één ZIP met alle videokaarten.
+Elke kaart krijgt de stad en activiteit als opschrift en in de bestandsnaam,
+met een volgnummer om dubbele namen te voorkomen. Alle kaarten gebruiken dezelfde
+gekozen Studio-stijl, achtergrond en afmetingen (1800 × 2250 pixels, 300 dpi).
+Bij **Startbeeld-filmkaart** gebruikt de bundel automatisch de gegenereerde
+thumbnail van elke video; ontbreekt die, scan de video's opnieuw.
+De teksten blijven alleen in de geopende pagina staan. Houd de pagina open tot
+de export klaar is. De bundel wordt lokaal in de browser samengesteld.
+
 ## Let op bij de video's zelf
 
 - Gebruik H.264/mp4 — dat speelt native af in Safari (iOS) en Chrome (Android).

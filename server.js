@@ -235,6 +235,12 @@ function adminPage(result = "") {
     .album-settings { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed #d1d5db; }
     .album-settings label { font-size: 13px; }
     .album-settings button { white-space: nowrap; }
+    .batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); background: #fff; }
+    .batch-row strong { grid-column: 1 / -1; font-size: 13px; color: #6b7280; }
+    .batch-row label { display: grid; gap: 5px; }
+    .batch-row input { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; }
+    #download-all { margin-top: 18px; background: #bf175d; }
+    button:disabled { opacity: .55; cursor: wait; }
     .empty { margin-top: 32px; color: #6b7280; }
     @media (max-width: 600px) {
       .studio { padding: 18px; }
@@ -291,6 +297,22 @@ function adminPage(result = "") {
         <p class="print-note" id="print-note">Transparante PNG · 1800 × 2250 px · 300 dpi</p>
       </div>
     </div>
+  </section>
+  <section class="studio" id="batch-studio">
+    <h2>Alle QR-kaarten downloaden</h2>
+    <p>Alle videokaarten als één ZIP: 1800 × 2250 px, PNG op 300 dpi, in de stijl en achtergrond van QR Studio. Vul per video de stad en activiteit in; beide komen op de kaart. Bij de filmkaart gebruiken we het startbeeld van de video.</p>
+    <form id="batch-form">
+      <div class="videos">
+        ${videos.map(([id, relativePath]) => `<article class="batch-row" data-id="${escapeHtml(id)}" data-url="${escapeHtml(`${BASE_URL}/v?id=${encodeURIComponent(id)}`)}">
+          <strong>${escapeHtml(relativePath)}</strong>
+          <label>Stadsnaam <input class="batch-city" required maxlength="60" placeholder="Bijvoorbeeld Bangkok" /></label>
+          <label>Activiteit <input class="batch-activity" required maxlength="80" value="${escapeHtml(displayVideoTitle(relativePath))}" /></label>
+        </article>`).join("")}
+      </div>
+      <p><small>De teksten blijven in deze pagina staan zolang je niet vernieuwt. Houd de pagina open tijdens het maken van de ZIP.</small></p>
+      <button id="download-all" type="submit"${videos.length ? "" : " disabled"}>Download alle QR-kaarten (.zip)</button>
+      <p id="batch-status" role="status" aria-live="polite"></p>
+    </form>
   </section>
   ${foldersHtml}
   ${videosHtml}
@@ -390,7 +412,8 @@ function adminPage(result = "") {
       context.restore();
     }
 
-    function drawDesign() {
+    function drawDesign(city = "") {
+      if (typeof city !== "string") city = "";
       const title = (titleInput.value.trim() || "VIDEO").toUpperCase();
       const pink = styleInput.value === "pink";
       const photo = styleInput.value === "photo";
@@ -451,8 +474,15 @@ function adminPage(result = "") {
 
       if (pink) drawPinkDetails();
 
+      if (city) {
+        context.fillStyle = "#9b5975";
+        context.font = "700 70px 'Avenir Next Condensed', 'Trebuchet MS', sans-serif";
+        context.textAlign = "center";
+        context.fillText(city.toUpperCase(), 900, photo ? 1870 : 1780, 1380);
+        context.textAlign = "start";
+      }
       const fontSize = fitTitle(title);
-      const textWidth = context.measureText(title).width;
+      const textWidth = Math.min(context.measureText(title).width, 1180);
       const iconWidth = 120;
       const gap = 42;
       const startX = (canvas.width - textWidth - iconWidth - gap) / 2;
@@ -460,7 +490,7 @@ function adminPage(result = "") {
       drawVideoIcon(startX + 48, titleY - 38);
       context.fillStyle = "#202020";
       context.textBaseline = "alphabetic";
-      context.fillText(title, startX + iconWidth + gap, titleY);
+      context.fillText(title, startX + iconWidth + gap, titleY, 1180);
 
       if (pink || photo) {
         context.strokeStyle = "#df0e68";
@@ -475,30 +505,33 @@ function adminPage(result = "") {
       context.restore();
     }
 
+    let qrRequest = 0;
+    async function loadImage(url) {
+      const image = new Image();
+      image.src = url;
+      await image.decode();
+      return image;
+    }
+
+    async function fetchQr(value, transparent) {
+      const response = await fetch("/admin/qr-preview?transparent=" + (transparent ? "1" : "0") + "&url=" + encodeURIComponent(value));
+      if (!response.ok) throw new Error("QR-code kon niet worden geladen");
+      const objectUrl = URL.createObjectURL(await response.blob());
+      try { return await loadImage(objectUrl); }
+      finally { URL.revokeObjectURL(objectUrl); }
+    }
+
     async function updateQr() {
-      const value = urlInput.value.trim();
-      if (!value) {
-        qrImage = null;
-        drawDesign();
-        return;
-      }
+      const request = ++qrRequest;
       try {
-        const transparent = backgroundInput.value === "transparent";
-        const response = await fetch("/admin/qr-preview?transparent=" + (transparent ? "1" : "0") + "&url=" + encodeURIComponent(value));
-        if (!response.ok) throw new Error("Ongeldige URL");
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        const image = new Image();
-        image.onload = () => {
-          URL.revokeObjectURL(objectUrl);
-          qrImage = image;
-          drawDesign();
-        };
-        image.src = objectUrl;
+        const image = urlInput.value.trim() ? await fetchQr(urlInput.value.trim(), backgroundInput.value === "transparent") : null;
+        if (request !== qrRequest) return;
+        qrImage = image;
       } catch {
+        if (request !== qrRequest) return;
         qrImage = null;
-        drawDesign();
       }
+      drawDesign();
     }
 
     function crc32(bytes) {
@@ -535,6 +568,93 @@ function adminPage(result = "") {
       link.click();
       setTimeout(() => URL.revokeObjectURL(link.href), 1000);
     }
+
+    // ZIP in store mode: PNGs are already compressed. No external service needed.
+    function zipFiles(files) {
+      const parts = [], directory = [];
+      let offset = 0, directorySize = 0;
+      if (files.length > 65535) throw new Error("Te veel kaarten voor één ZIP");
+      for (const file of files) {
+        const name = new TextEncoder().encode(file.name);
+        const crc = crc32(file.bytes);
+        const local = new Uint8Array(30 + name.length);
+        const lv = new DataView(local.buffer);
+        lv.setUint32(0, 0x04034b50, true);
+        lv.setUint16(4, 20, true);
+        lv.setUint16(6, 0x0800, true);
+        lv.setUint16(12, 33, true);
+        lv.setUint32(14, crc, true);
+        lv.setUint32(18, file.bytes.length, true);
+        lv.setUint32(22, file.bytes.length, true);
+        lv.setUint16(26, name.length, true);
+        local.set(name, 30);
+        const central = new Uint8Array(46 + name.length);
+        const cv = new DataView(central.buffer);
+        cv.setUint32(0, 0x02014b50, true);
+        cv.setUint16(4, 20, true);
+        central.set(local.slice(4, 30), 6);
+        cv.setUint32(42, offset, true);
+        central.set(name, 46);
+        parts.push(local, file.bytes);
+        directory.push(central);
+        offset += local.length + file.bytes.length;
+        directorySize += central.length;
+        if (offset + directorySize > 0xffffffff) throw new Error("ZIP is te groot");
+      }
+      const end = new Uint8Array(22);
+      const ev = new DataView(end.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, files.length, true);
+      ev.setUint16(10, files.length, true);
+      ev.setUint32(12, directorySize, true);
+      ev.setUint32(16, offset, true);
+      return new Blob([...parts, ...directory, end], { type: "application/zip" });
+    }
+
+    document.getElementById("batch-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const rows = [...document.querySelectorAll(".batch-row")];
+      if (!rows.length) return;
+      const status = document.getElementById("batch-status");
+      const saved = { title: titleInput.value, qr: qrImage, image: startImage };
+      const controls = [...document.querySelectorAll("input, button, select")];
+      const disabled = controls.map((control) => control.disabled);
+      clearTimeout(qrTimer);
+      ++qrRequest;
+      controls.forEach((control) => { control.disabled = true; });
+      try {
+        const files = [];
+        for (const [index, row] of rows.entries()) {
+          const city = row.querySelector(".batch-city").value.trim();
+          const activity = row.querySelector(".batch-activity").value.trim();
+          if (!city || !activity) throw new Error("Vul voor elke video een stadsnaam en activiteit in.");
+          status.textContent = "Kaart " + (index + 1) + " van " + rows.length + ": " + city + " · " + activity;
+          qrImage = await fetchQr(row.dataset.url, backgroundInput.value === "transparent");
+          if (styleInput.value === "photo") startImage = await loadImage("/thumb/" + encodeURIComponent(row.dataset.id));
+          titleInput.value = activity;
+          drawDesign(city);
+          const png = await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("PNG maken mislukt")), "image/png"));
+          const bytes = new Uint8Array(await (await pngAt300Dpi(png)).arrayBuffer());
+          const slug = (city + "-" + activity).normalize("NFKD").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 120) || "kaart";
+          files.push({ name: slug + "--" + (index + 1) + ".png", bytes });
+        }
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(zipFiles(files));
+        link.download = "qr-kaarten.zip";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 60000);
+        status.textContent = files.length + " QR-kaarten klaar. De ZIP-download is gestart.";
+      } catch (error) {
+        status.textContent = "Download niet gemaakt: " + error.message + ". Controleer de teksten en startbeelden en probeer opnieuw.";
+      } finally {
+        titleInput.value = saved.title;
+        qrImage = saved.qr;
+        startImage = saved.image;
+        controls.forEach((control, index) => { control.disabled = disabled[index]; });
+        drawDesign();
+        updateQr();
+      }
+    });
 
     document.querySelectorAll(".design").forEach((button) => {
       button.addEventListener("click", () => {
@@ -946,6 +1066,12 @@ app.get("/gallery", (req, res) => {
     .card { display: inline-flex; width: 100%; margin-bottom: 16px; break-inside: avoid; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
     .card img { display: block; width: 100%; height: auto; border-radius: 10px; background: #e5e7eb; }
     .card span { font-size: 14px; overflow-wrap: anywhere; }
+    .batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); background: #fff; }
+    .batch-row strong { grid-column: 1 / -1; font-size: 13px; color: #6b7280; }
+    .batch-row label { display: grid; gap: 5px; }
+    .batch-row input { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font: inherit; }
+    #download-all { margin-top: 18px; background: #bf175d; }
+    button:disabled { opacity: .55; cursor: wait; }
     .empty { margin-top: 32px; color: #6b7280; }
   </style>
 </head>
