@@ -12,6 +12,7 @@ const crypto = require("crypto");
 const { execFile } = require("child_process");
 const { promisify } = require("util");
 const QRCode = require("qrcode");
+const { loadArchive, withDataLock } = require("./archive");
 
 const execFileAsync = promisify(execFile);
 
@@ -170,11 +171,11 @@ function folderQrFileName(folder) {
 
 async function main() {
   if (!fs.existsSync(VIDEOS_DIR)) {
-    console.error(`Videomap niet gevonden: ${VIDEOS_DIR}`);
-    process.exit(1);
+    throw new Error(`Videomap niet gevonden: ${VIDEOS_DIR}`);
   }
 
-  const mapping = loadMapping(); // { id: "relatief/pad.mp4" }
+  const archive = loadArchive(DATA_DIR);
+  const mapping = { ...loadMapping(), ...archive.mapping }; // { id: "relatief/pad.mp4" }
   const sourceState = loadSourceState(); // { id: { size, mtimeMs } }
   const pathToId = new Map(Object.entries(mapping).map(([id, p]) => [p, id]));
 
@@ -193,7 +194,7 @@ async function main() {
   // ruim alle afgeleide bestanden op. Daardoor verdwijnen ze uit /gallery en
   // werken hun oude afspeellinks niet meer.
   for (const [id, relativePath] of Object.entries(mapping)) {
-    if (foundVideoSet.has(relativePath)) continue;
+    if (archive.videos[id] || foundVideoSet.has(relativePath)) continue;
 
     removeIfExists(path.join(QR_DIR, qrFileName(relativePath, id)), "QR");
     removeIfExists(path.join(QR_DIR, `${id}.png`), "QR");
@@ -207,6 +208,10 @@ async function main() {
   }
 
   for (const relativePath of foundVideos) {
+    if (archive.albums[path.dirname(relativePath)]) {
+      console.log(`Bevroren album, bron overgeslagen: ${relativePath}`);
+      continue;
+    }
     let id = pathToId.get(relativePath);
     const isNew = !id;
 
@@ -280,6 +285,7 @@ async function main() {
   // Maak één deelbare galerij-QR per echte submap. De queryparameter behoudt
   // ook spaties, accenten en geneste mapnamen correct via URL-encoding.
   const folders = new Set(foundVideos.map((relativePath) => path.dirname(relativePath)).filter((folder) => folder !== "."));
+  for (const folder of Object.keys(archive.albums)) folders.add(folder);
   const expectedFolderQrFiles = new Set();
   for (const folder of [...folders].sort((left, right) => left.localeCompare(right, "nl"))) {
     const fileName = folderQrFileName(folder);
@@ -322,7 +328,7 @@ async function main() {
   console.log(`Map-QR-codes: ${FOLDER_QR_DIR}`);
 }
 
-main().catch((err) => {
+withDataLock(DATA_DIR, main).catch((err) => {
   console.error(err);
   process.exit(1);
 });

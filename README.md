@@ -151,3 +151,47 @@ en er is geen route die de video's per ID laat doorbladeren. Voor een fotoboek i
 ruim voldoende; een wachtwoord is niet nodig en zou het scannen alleen maar lastiger
 maken. De galerij op `/gallery` is een bewuste uitzondering: die is publiek en toont
 wél een overzicht van alle video's.
+
+## Gedrukt fotoboek: album bevriezen
+
+Ga naar **Beheer → Vakantie-albums → Thailand**, vink **Fotoboek besteld — dit
+album blijvend bevriezen** aan en klik **Album bevriezen**. Doe dit voordat je
+bronvideo's wijzigt of verwijdert. Het vinkje staat pas definitief aan als de
+volledige kopie is voltooid. Bij grote albums kan dit enkele minuten duren;
+vernieuw de beheerpagina als de verbinding tussentijds afloopt om de status te zien.
+
+De reeds gedrukte QR-codes veranderen **niet**. Zowel `/v?id=…`, `/video/…`,
+`/thumb/…` als `/gallery?folder=thailand` blijven dezelfde editie leveren (met de
+oorspronkelijke spelling van je map). De app bewaart de momenteel afgespeelde
+videokopieën, beschikbare thumbnails, QR-afbeeldingen, afspeelpagina's en de
+albumoverzichtspagina inclusief de huidige Thailand-vormgeving. Het archief staat
+in **`data/frozen-albums/`** op het bestaande blijvende Docker-volume. Er worden
+zelfstandige bestandskopieën gemaakt, geen verwijzingen naar de bronbestanden.
+
+Een scan overschrijft of verwijdert deze editie niet. Nieuwe bestanden in diezelfde
+map worden overgeslagen. Maak voor een nieuwe editie een **andere mapnaam**;
+die krijgt eigen links. Bevriezen geldt voor de direct in de gekozen map opgenomen
+video's, net als de albumgalerij; submappen zijn afzonderlijke albums. Bevroren
+albums hebben bewust geen ontgrendel- of verwijderknop. Een herhaalde
+bevriesopdracht behoudt het eerste archief.
+
+**Back-up:** neem de volledige NAS-map `data/` op in een back-up op een andere
+schijf of locatie; neem ook `videos/` mee voor niet-bevroren albums. Alleen een
+kopie van `mapping.json` is niet genoeg. Bewaar daarnaast je Docker-instellingen,
+domein en Cloudflare Tunnel-configuratie. Bij herstel zet je `data/` terug op
+hetzelfde volume en laat je het bestaande domein naar de server wijzen. De
+`manifest.json` per archief bevat SHA-256-controlesommen om de archiefbestanden
+na herstel te controleren. Het vinkje beschermt tegen wijzigingen in deze app,
+niet tegen schijfverlies, handmatig verwijderen van het archief of het vervallen
+van het domein. Reserveer extra schijfruimte ter grootte van de bewaarde video's.
+
+Scannen, instellingen opslaan en bevriezen gebruiken dezelfde `data/update.lock`
+om gelijktijdige wijzigingen te voorkomen. Bij een afgebroken proces kan die
+lock blijven staan: stop eerst de container en eventuele losse generators,
+controleer dat er geen archivering meer draait en verwijder dan alleen
+`data/update.lock` voordat je de container start. Mappen met de prefix `.pending-`
+zijn onvoltooide archieven en worden nooit als bevroren editie gepubliceerd.
+Een mislukte kopie activeert het vinkje niet.
+
+Ontwikkelcontrole: `npm test` test onder andere dat verwijderen, vervangen en
+opnieuw scannen de bevroren links en Range-requests intact laat.

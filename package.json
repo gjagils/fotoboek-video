@@ -5,7 +5,8 @@
   "type": "commonjs",
   "scripts": {
     "generate": "node generate.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "express": "^4.19.2",

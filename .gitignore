@@ -8,3 +8,6 @@ data/qrcodes/
 data/folder-qrcodes/
 data/thumbnails/
 data/streamable/
+
+data/frozen-albums/
+data/update.lock

@@ -21,6 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Test QR links and frozen albums
+        run: |
+          npm install --ignore-scripts
+          npm test
+
       - name: Bump version
         run: |
           cat > /tmp/bump-version.js << 'EOF'

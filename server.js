@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const { execFile } = require("child_process");
 const express = require("express");
 const QRCode = require("qrcode");
+const { loadArchive, withDataLock } = require("./archive");
 
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
@@ -172,6 +173,7 @@ function adminPage(result = "") {
   });
   const folders = mappedFolders(mapping);
   const gallerySettings = loadGallerySettings();
+  const frozenAlbums = loadArchive(DATA_DIR).albums;
   const foldersHtml = folders.length
     ? `<section>
         <h2>Vakantie-albums</h2>
@@ -187,7 +189,14 @@ function adminPage(result = "") {
                 <button class="design" type="button" data-url="${escapeHtml(url)}" data-title="${escapeHtml(settings.title)}">Ontwerp kader</button>
                 <a class="button secondary" href="/admin/folder-qr?folder=${encodeURIComponent(folder)}">Download QR</a>
               </div>
+              <form method="post" action="/admin/freeze" class="freeze-settings">
+                <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
+                <label><input type="checkbox" name="freeze" value="yes" required${frozenAlbums[folder] ? " checked disabled" : ""} /> Fotoboek besteld — dit album blijvend bevriezen</label>
+                <small>${frozenAlbums[folder] ? `Bevroren op ${escapeHtml(new Date(frozenAlbums[folder].frozenAt).toLocaleDateString("nl-NL"))}. De gedrukte QR-links gebruiken het archief. Nieuwe editie? Gebruik een andere map.` : "Bewaart een aparte kopie van de huidige video's en pagina's. Bestaande QR-links blijven deze editie openen. Dit kost extra schijfruimte. Neem het archief mee in je NAS-back-up."}</small>
+                ${frozenAlbums[folder] ? "" : '<button type="submit">Album bevriezen</button>'}
+              </form>
               <form class="album-settings" method="post" action="/admin/gallery-settings">
+                <fieldset${frozenAlbums[folder] ? " disabled" : ""} style="display:contents">
                 <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
                 <label>Vormgeving
                   <select name="theme">
@@ -202,6 +211,7 @@ function adminPage(result = "") {
                   <input name="subtitle" maxlength="120" value="${escapeHtml(settings.subtitle)}" />
                 </label>
                 <button type="submit">Instellingen opslaan</button>
+                </fieldset>
               </form>
             </article>`;
           }).join("")}
@@ -261,6 +271,8 @@ function adminPage(result = "") {
     article > a { color: #1d4ed8; }
     article .actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; gap: 8px; }
     .album-settings { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed #d1d5db; }
+    .freeze-settings { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid #d1d5db; }
+    .freeze-settings input[type="checkbox"] { width: auto; }
     .album-settings label { font-size: 13px; }
     .album-settings button { white-space: nowrap; }
     .batch-row[hidden] { display: none; }
@@ -861,6 +873,11 @@ app.get("/admin/qr-preview", requireAdmin, async (req, res) => {
 app.get("/admin/qr/:id", requireAdmin, (req, res) => {
   const id = String(req.params.id || "");
   const mapping = loadMapping();
+  const archived = loadArchive(DATA_DIR).videos[id];
+  if (archived) {
+    res.download(path.join(archived.directory, `${id}.png`), qrDownloadFileName(archived.relativePath, id));
+    return;
+  }
 
   if (!/^[a-f0-9]{10}$/.test(id) || !mapping[id] || !fs.existsSync(QR_DIR)) {
     res.status(404).send("QR-code niet gevonden.");
@@ -889,6 +906,11 @@ app.get("/admin/folder-qr", requireAdmin, (req, res) => {
   }
 
   const fileName = folderQrFileName(folder);
+  const archived = loadArchive(DATA_DIR).albums[folder];
+  if (archived) {
+    res.download(path.join(archived.directory, "album.png"), fileName);
+    return;
+  }
   const absolutePath = path.join(FOLDER_QR_DIR, fileName);
   if (!fs.existsSync(absolutePath)) {
     res.status(404).send("Map-QR-code niet gevonden. Draai eerst de generator.");
@@ -898,7 +920,7 @@ app.get("/admin/folder-qr", requireAdmin, (req, res) => {
   res.download(absolutePath, fileName);
 });
 
-app.post("/admin/gallery-settings", requireAdmin, (req, res) => {
+app.post("/admin/gallery-settings", requireAdmin, async (req, res) => {
   const folder = String(req.body.folder || "");
   const theme = String(req.body.theme || "default");
   const title = String(req.body.title || "").trim().slice(0, 80);
@@ -910,10 +932,37 @@ app.post("/admin/gallery-settings", requireAdmin, (req, res) => {
     return;
   }
 
-  const settings = loadGallerySettings();
-  settings[folder] = { theme, title: title || folder, subtitle };
-  saveGallerySettings(settings);
-  res.status(200).type("html").send(adminPage(`Instellingen voor ${folder} opgeslagen.`));
+  try {
+    await withDataLock(DATA_DIR, async () => {
+      if (loadArchive(DATA_DIR).albums[folder]) throw new Error("Dit album is bevroren. Maak een andere map voor een nieuwe editie.");
+      const settings = loadGallerySettings();
+      settings[folder] = { theme, title: title || folder, subtitle };
+      saveGallerySettings(settings);
+    });
+    res.status(200).type("html").send(adminPage(`Instellingen voor ${folder} opgeslagen.`));
+  } catch (error) {
+    res.status(409).type("html").send(adminPage(error.message));
+  }
+});
+
+app.post("/admin/freeze", requireAdmin, (req, res) => {
+  const folder = typeof req.body.folder === "string" ? req.body.folder : "";
+  if (req.body.freeze !== "yes" || !mappedFolders(loadMapping()).includes(folder)) {
+    res.status(400).type("html").send(adminPage("Kies een bestaande map en vink bevriezen aan."));
+    return;
+  }
+  if (generationInProgress) {
+    res.status(409).type("html").send(adminPage("Er draait al een scan of archivering. Probeer het later opnieuw."));
+    return;
+  }
+  generationInProgress = true;
+  // Run copying in a worker so existing QR links keep responding during the copy.
+  execFile(process.execPath, [path.join(__dirname, "freeze.js"), folder], (error, stdout, stderr) => {
+    generationInProgress = false;
+    res.status(error ? 500 : 200).type("html").send(adminPage(error
+      ? `Bevriezen niet voltooid: ${stderr || error.message}. Het vinkje wordt pas na een volledige kopie actief.`
+      : stdout));
+  });
 });
 
 app.post("/admin/generate", requireAdmin, (req, res) => {
@@ -937,13 +986,18 @@ app.post("/admin/generate", requireAdmin, (req, res) => {
 });
 
 function loadMapping() {
-  if (!fs.existsSync(MAPPING_FILE)) return {};
-  return JSON.parse(fs.readFileSync(MAPPING_FILE, "utf8"));
+  const current = fs.existsSync(MAPPING_FILE) ? JSON.parse(fs.readFileSync(MAPPING_FILE, "utf8")) : {};
+  const archive = loadArchive(DATA_DIR);
+  // Suppress new/replaced live entries under a frozen gallery link.
+  return { ...Object.fromEntries(Object.entries(current).filter(([, file]) => !archive.albums[path.dirname(file)])), ...archive.mapping };
 }
 
 // Afspeelpagina
-app.get("/v", (req, res) => {
+app.get("/v", renderPlayer);
+function renderPlayer(req, res) {
   const id = String(req.query.id || "");
+  const archived = loadArchive(DATA_DIR).videos[id];
+  if (archived) { res.sendFile(path.join(archived.directory, `${id}.html`)); return; }
   const mapping = loadMapping();
   const relativePath = mapping[id];
 
@@ -984,7 +1038,7 @@ app.get("/v", (req, res) => {
 </html>`;
 
   res.status(200).type("html").send(html);
-});
+}
 
 // Video-bestand zelf. res.sendFile ondersteunt Range-requests automatisch,
 // dat is nodig zodat je op je telefoon door de video heen kunt spoelen.
@@ -992,6 +1046,8 @@ app.get("/v", (req, res) => {
 // zie STREAM_DIR), gebruiken we die: de browser kan dan direct beginnen met
 // afspelen in plaats van eerst het hele bestand te moeten downloaden.
 app.get("/video/:id", (req, res) => {
+  const archived = loadArchive(DATA_DIR).videos[req.params.id];
+  if (archived) { res.sendFile(path.join(archived.directory, `${req.params.id}.mp4`)); return; }
   const mapping = loadMapping();
   const relativePath = mapping[req.params.id];
 
@@ -1022,6 +1078,12 @@ app.get("/video/:id", (req, res) => {
 // Thumbnail (eerste frame) van een video, gebruikt als poster op de afspeelpagina
 // en op de publieke galerij-pagina.
 app.get("/thumb/:id", (req, res) => {
+  const archived = loadArchive(DATA_DIR).videos[req.params.id];
+  if (archived) {
+    if (!archived.hasThumbnail) { res.status(404).send("Thumbnail niet gevonden."); return; }
+    res.sendFile(path.join(archived.directory, `${req.params.id}.jpg`));
+    return;
+  }
   const mapping = loadMapping();
   const id = req.params.id;
 
@@ -1052,9 +1114,12 @@ app.use("/assets", express.static(path.join(__dirname, "assets"), {
 
 // Publieke galerij: overzicht van alle video's per map, met thumbnails,
 // zodat je ze ook aan mensen kunt laten zien zonder het fotoboek erbij.
-app.get("/gallery", (req, res) => {
-  const mapping = loadMapping();
+app.get("/gallery", renderGallery);
+function renderGallery(req, res) {
   const requestedFolder = typeof req.query.folder === "string" ? req.query.folder : null;
+  const archived = loadArchive(DATA_DIR).albums[requestedFolder];
+  if (archived) { res.sendFile(path.join(archived.directory, "gallery.html")); return; }
+  const mapping = loadMapping();
   const folders = mappedFolders(mapping);
 
   if (requestedFolder !== null && !folders.includes(requestedFolder)) {
@@ -1179,7 +1244,7 @@ app.get("/gallery", (req, res) => {
   ${sectionsHtml}
 </body>
 </html>`);
-});
+}
 
 // Geen enkele andere route bestaat (dus ook geen mapoverzicht of index-listing).
 // /admin is alleen beschikbaar met het beheerderswachtwoord.
@@ -1193,4 +1258,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { app, adminPage, parseVideoLabel };
+module.exports = { app, adminPage, parseVideoLabel, renderGallery, renderPlayer };
