@@ -68,16 +68,26 @@ kan transparant of wit worden geëxporteerd; transparant is standaard. Gebruik
 voor Albelli bij voorkeur **Wit · Albelli veilig**. De JPG-reserve-export heeft
 altijd een witte achtergrond.
 
-Onder **Alle QR-kaarten downloaden** vul je per video de stadsnaam en activiteit
-in. De activiteit wordt alvast afgeleid van de bestandsnaam; controleer en pas die
-aan. Klik op **Download alle QR-kaarten (.zip)** voor één ZIP met alle videokaarten.
-Elke kaart krijgt de stad en activiteit als opschrift en in de bestandsnaam,
-met een volgnummer om dubbele namen te voorkomen. Alle kaarten gebruiken dezelfde
-gekozen Studio-stijl, achtergrond en afmetingen (1800 × 2250 pixels, 300 dpi).
-Bij **Startbeeld-filmkaart** gebruikt de bundel automatisch de gegenereerde
-thumbnail van elke video; ontbreekt die, scan de video's opnieuw.
-De teksten blijven alleen in de geopende pagina staan. Houd de pagina open tot
-de export klaar is. De bundel wordt lokaal in de browser samengesteld.
+Onder **Vakantiealbum downloaden** kies je een videomap. De ZIP bevat alle
+videokaarten rechtstreeks uit die map, plus één QR-kaart die de bijbehorende
+`/gallery?folder=…`-totaalpagina opent. Dit volgt hetzelfde mapfilter als de galerij;
+eventuele submappen kies je afzonderlijk. De titel van de albumkaart is aanpasbaar.
+Ook bij **Vakantie-albums → Ontwerp kader** kun je een losse albumkaart maken.
+
+Stapnummer, plaats en activiteit worden zo mogelijk uit de bestandsnaam gehaald:
+`01 - Chiang Mai - Tempelbezoek.mp4` of `Step 02_Bangkok_Fietsen.mp4`.
+`Stap nr. 03 - Pai - Wandelen.mp4` werkt ook. Exportaanduidingen zoals
+`compleet 9x16` en kopienummers tussen haakjes worden verwijderd. Controleer de
+herkende teksten voor het downloaden; bij onduidelijke namen blijft de plaats
+leeg. Het stapnummer is optioneel en komt samen met de plaats boven de activiteit.
+De kaarten volgen de stapnummers en krijgen unieke bestandsnamen.
+
+Alle kaarten gebruiken dezelfde gekozen Studio-stijl, achtergrond en afmetingen
+(1800 × 2250 pixels, 300 dpi). Bij **Startbeeld-filmkaart** gebruikt elke video
+zijn eigen gegenereerde thumbnail en de albumkaart die van de eerste video.
+Ontbreekt een thumbnail, scan de video's opnieuw. De teksten blijven alleen in
+de geopende pagina staan. Houd de pagina open tot de export klaar is; de ZIP
+wordt lokaal in de browser samengesteld.
 
 ## Let op bij de video's zelf
 

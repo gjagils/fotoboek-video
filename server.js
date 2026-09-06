@@ -139,10 +139,37 @@ function displayVideoTitle(relativePath) {
   return title ? title.charAt(0).toLocaleUpperCase("nl") + title.slice(1) : "Video";
 }
 
+// Explicit separators keep multi-word places intact; ambiguous names remain editable.
+function parseVideoLabel(relativePath) {
+  let name = path.parse(relativePath).name
+    .replace(/\(\s*\d+\s*\)/g, " ")
+    .replace(/compleet[\s_-]*9\s*[x×]\s*16/gi, " ")
+    .replace(/\bcompleet\b/gi, " ")
+    .replace(/^thailand[\s_-]+/i, "").trim();
+  const match = name.match(/^(?:(?:step|stap)\s*(?:nr\.?\s*)?[_-]?\s*)?(\d{1,3})(?:[\s._-]+|$)/i);
+  const step = match ? match[1] : "";
+  if (match) name = name.slice(match[0].length).trim();
+  const separator = /\s[-–—]\s|__+/.test(name) ? /\s+[-–—]\s+|__+/ : /[_–—-]+/;
+  const parts = name.split(separator).map(part => part.replace(/_/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  return {
+    step,
+    city: parts.length > 1 ? parts[0] : "",
+    activity: parts.length > 1 ? parts.slice(1).join(" ") : displayVideoTitle(name + ".mp4"),
+  };
+}
+
 function adminPage(result = "") {
   const resultHtml = result ? `<pre>${escapeHtml(result)}</pre>` : "";
   const mapping = loadMapping();
-  const videos = Object.entries(mapping).sort((left, right) => left[1].localeCompare(right[1], "nl"));
+  const videos = Object.entries(mapping).sort((left, right) => {
+    const folderOrder = path.dirname(left[1]).localeCompare(path.dirname(right[1]), "nl");
+    if (folderOrder) return folderOrder;
+    const leftStep = parseVideoLabel(left[1]).step;
+    const rightStep = parseVideoLabel(right[1]).step;
+    if (Boolean(leftStep) !== Boolean(rightStep)) return leftStep ? -1 : 1;
+    if (leftStep && rightStep && Number(leftStep) !== Number(rightStep)) return Number(leftStep) - Number(rightStep);
+    return left[1].localeCompare(right[1], "nl", { numeric: true });
+  });
   const folders = mappedFolders(mapping);
   const gallerySettings = loadGallerySettings();
   const foldersHtml = folders.length
@@ -157,6 +184,7 @@ function adminPage(result = "") {
               <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
               <div class="actions">
                 <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
+                <button class="design" type="button" data-url="${escapeHtml(url)}" data-title="${escapeHtml(settings.title)}">Ontwerp kader</button>
                 <a class="button secondary" href="/admin/folder-qr?folder=${encodeURIComponent(folder)}">Download QR</a>
               </div>
               <form class="album-settings" method="post" action="/admin/gallery-settings">
@@ -235,6 +263,9 @@ function adminPage(result = "") {
     .album-settings { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed #d1d5db; }
     .album-settings label { font-size: 13px; }
     .album-settings button { white-space: nowrap; }
+    .batch-row[hidden] { display: none; }
+    #batch-form > label { display: grid; gap: 5px; margin: 12px 0; }
+    #batch-form > label input, #batch-folder { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; }
     .batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); background: #fff; }
     .batch-row strong { grid-column: 1 / -1; font-size: 13px; color: #6b7280; }
     .batch-row label { display: grid; gap: 5px; }
@@ -299,18 +330,32 @@ function adminPage(result = "") {
     </div>
   </section>
   <section class="studio" id="batch-studio">
-    <h2>Alle QR-kaarten downloaden</h2>
-    <p>Alle videokaarten als één ZIP: 1800 × 2250 px, PNG op 300 dpi, in de stijl en achtergrond van QR Studio. Vul per video de stad en activiteit in; beide komen op de kaart. Bij de filmkaart gebruiken we het startbeeld van de video.</p>
+    <h2>Vakantiealbum downloaden</h2>
+    <p>Kies een map: de ZIP bevat alle videokaarten uit die map én een QR-kaart voor de totaalpagina. Alle kaarten gebruiken de gekozen QR Studio-stijl en achtergrond, op 1800 × 2250 px en 300 dpi.</p>
     <form id="batch-form">
+      <label>Vakantiemap
+        <select id="batch-folder" required>
+          ${folders.map(folder => {
+            const settings = { ...defaultGallerySettings(folder), ...gallerySettings[folder] };
+            return `<option value="${escapeHtml(folder)}" data-title="${escapeHtml(settings.title)}" data-url="${escapeHtml(`${BASE_URL}/gallery?folder=${encodeURIComponent(folder)}`)}">${escapeHtml(folder)}</option>`;
+          }).join("")}
+        </select>
+      </label>
+      <label>Titel op de albumkaart <input id="batch-album-title" required maxlength="80" /></label>
+      <p><small>Controleer de herkende stap, plaats en activiteit. Naamvoorbeeld: 01 - Chiang Mai - Tempelbezoek.mp4. Bij de filmkaart krijgt de albumkaart het startbeeld van de eerste video.</small></p>
       <div class="videos">
-        ${videos.map(([id, relativePath]) => `<article class="batch-row" data-id="${escapeHtml(id)}" data-url="${escapeHtml(`${BASE_URL}/v?id=${encodeURIComponent(id)}`)}">
+        ${videos.map(([id, relativePath]) => {
+          const label = parseVideoLabel(relativePath);
+          return `<article class="batch-row" data-folder="${escapeHtml(path.dirname(relativePath))}" data-id="${escapeHtml(id)}" data-url="${escapeHtml(`${BASE_URL}/v?id=${encodeURIComponent(id)}`)}">
           <strong>${escapeHtml(relativePath)}</strong>
-          <label>Stadsnaam <input class="batch-city" required maxlength="60" placeholder="Bijvoorbeeld Bangkok" /></label>
-          <label>Activiteit <input class="batch-activity" required maxlength="80" value="${escapeHtml(displayVideoTitle(relativePath))}" /></label>
-        </article>`).join("")}
+          <label>Stapnummer <input class="batch-step" maxlength="12" value="${escapeHtml(label.step)}" placeholder="Optioneel" /></label>
+          <label>Plaats <input class="batch-city" required maxlength="60" value="${escapeHtml(label.city)}" placeholder="Bijvoorbeeld Bangkok" /></label>
+          <label>Activiteit <input class="batch-activity" required maxlength="80" value="${escapeHtml(label.activity)}" /></label>
+        </article>`;
+        }).join("")}
       </div>
       <p><small>De teksten blijven in deze pagina staan zolang je niet vernieuwt. Houd de pagina open tijdens het maken van de ZIP.</small></p>
-      <button id="download-all" type="submit"${videos.length ? "" : " disabled"}>Download alle QR-kaarten (.zip)</button>
+      <button id="download-all" type="submit"${folders.length ? "" : " disabled"}>Download vakantiealbum (.zip)</button>
       <p id="batch-status" role="status" aria-live="polite"></p>
     </form>
   </section>
@@ -611,9 +656,41 @@ function adminPage(result = "") {
       return new Blob([...parts, ...directory, end], { type: "application/zip" });
     }
 
+    const folderInput = document.getElementById("batch-folder");
+    const albumTitleInput = document.getElementById("batch-album-title");
+    const albumTitles = new Map();
+    albumTitleInput.addEventListener("input", () => albumTitles.set(folderInput.value, albumTitleInput.value));
+    function selectBatchFolder() {
+      const folder = folderInput.value;
+      albumTitleInput.value = albumTitles.get(folder) ?? folderInput.selectedOptions[0]?.dataset.title ?? "";
+      let count = 0;
+      document.querySelectorAll(".batch-row").forEach(row => {
+        row.hidden = row.dataset.folder !== folder;
+        row.querySelectorAll("input").forEach(input => { input.disabled = row.hidden; });
+        if (!row.hidden) count++;
+      });
+      document.getElementById("download-all").disabled = !count;
+      document.getElementById("batch-status").textContent = count ? count + " videokaarten + 1 albumkaart in de ZIP." : "Geen video's in deze map.";
+    }
+    folderInput.addEventListener("change", selectBatchFolder);
+    selectBatchFolder();
+
+    async function cardBytes(url, title, caption, thumbnailId) {
+      qrImage = await fetchQr(url, backgroundInput.value === "transparent");
+      if (styleInput.value === "photo") startImage = await loadImage("/thumb/" + encodeURIComponent(thumbnailId));
+      titleInput.value = title;
+      drawDesign(caption);
+      const png = await new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("PNG maken mislukt")), "image/png"));
+      return new Uint8Array(await (await pngAt300Dpi(png)).arrayBuffer());
+    }
+
+    function fileSlug(value) {
+      return value.normalize("NFKD").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 120) || "kaart";
+    }
+
     document.getElementById("batch-form").addEventListener("submit", async (event) => {
       event.preventDefault();
-      const rows = [...document.querySelectorAll(".batch-row")];
+      const rows = [...document.querySelectorAll(".batch-row")].filter(row => row.dataset.folder === folderInput.value);
       if (!rows.length) return;
       const status = document.getElementById("batch-status");
       const saved = { title: titleInput.value, qr: qrImage, image: startImage };
@@ -623,24 +700,24 @@ function adminPage(result = "") {
       ++qrRequest;
       controls.forEach((control) => { control.disabled = true; });
       try {
-        const files = [];
+        const option = folderInput.selectedOptions[0];
+        const albumTitle = albumTitleInput.value.trim();
+        if (!albumTitle) throw new Error("Vul een titel in voor de albumkaart");
+        status.textContent = "Albumkaart maken: " + albumTitle;
+        const files = [{ name: "00-album-" + fileSlug(albumTitle) + ".png", bytes: await cardBytes(option.dataset.url, albumTitle, "Alle video's", rows[0].dataset.id) }];
         for (const [index, row] of rows.entries()) {
           const city = row.querySelector(".batch-city").value.trim();
           const activity = row.querySelector(".batch-activity").value.trim();
           if (!city || !activity) throw new Error("Vul voor elke video een stadsnaam en activiteit in.");
           status.textContent = "Kaart " + (index + 1) + " van " + rows.length + ": " + city + " · " + activity;
-          qrImage = await fetchQr(row.dataset.url, backgroundInput.value === "transparent");
-          if (styleInput.value === "photo") startImage = await loadImage("/thumb/" + encodeURIComponent(row.dataset.id));
-          titleInput.value = activity;
-          drawDesign(city);
-          const png = await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("PNG maken mislukt")), "image/png"));
-          const bytes = new Uint8Array(await (await pngAt300Dpi(png)).arrayBuffer());
-          const slug = (city + "-" + activity).normalize("NFKD").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 120) || "kaart";
-          files.push({ name: slug + "--" + (index + 1) + ".png", bytes });
+          const step = row.querySelector(".batch-step").value.trim();
+          const caption = step ? "Stap " + step + " · " + city : city;
+          const bytes = await cardBytes(row.dataset.url, activity, caption, row.dataset.id);
+          files.push({ name: String(index + 1).padStart(3, "0") + "-" + fileSlug([step, city, activity].filter(Boolean).join("-")) + ".png", bytes });
         }
         const link = document.createElement("a");
         link.href = URL.createObjectURL(zipFiles(files));
-        link.download = "qr-kaarten.zip";
+        link.download = "qr-" + fileSlug(folderInput.value) + ".zip";
         link.click();
         setTimeout(() => URL.revokeObjectURL(link.href), 60000);
         status.textContent = files.length + " QR-kaarten klaar. De ZIP-download is gestart.";
@@ -1066,6 +1143,9 @@ app.get("/gallery", (req, res) => {
     .card { display: inline-flex; width: 100%; margin-bottom: 16px; break-inside: avoid; flex-direction: column; gap: 8px; text-decoration: none; color: inherit; }
     .card img { display: block; width: 100%; height: auto; border-radius: 10px; background: #e5e7eb; }
     .card span { font-size: 14px; overflow-wrap: anywhere; }
+    .batch-row[hidden] { display: none; }
+    #batch-form > label { display: grid; gap: 5px; margin: 12px 0; }
+    #batch-form > label input, #batch-folder { width: 100%; box-sizing: border-box; padding: 10px; font: inherit; }
     .batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); background: #fff; }
     .batch-row strong { grid-column: 1 / -1; font-size: 13px; color: #6b7280; }
     .batch-row label { display: grid; gap: 5px; }
@@ -1090,6 +1170,10 @@ app.use((req, res) => {
   res.status(404).send("Niet gevonden.");
 });
 
-app.listen(PORT, () => {
-  console.log(`Server draait op poort ${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server draait op poort ${PORT}`);
+  });
+}
+
+module.exports = { app, adminPage, parseVideoLabel };
