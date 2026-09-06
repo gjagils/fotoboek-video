@@ -55,8 +55,11 @@ Als alternatief kan het generate-script vanuit de container worden gestart:
 ## QR Studio voor het fotoboek
 
 Op de beveiligde beheerpagina staat een QR Studio. Klik bij een video op
-**Ontwerp kader**, pas eventueel URL, titel en stijl aan en bekijk het resultaat
-direct. De roze reiskaderstijl bevat het video-icoon, de titel en subtiele roze
+**Ontwerp kader**, pas eventueel URL, stapnummer, stad, activiteit en stijl aan en bekijk het resultaat
+direct. Losse kaarten en de ZIP gebruiken dezelfde kaderstijlen en tekstindeling.
+Bij het openen van een video worden de herkende teksten (of je aanpassingen in het
+bulkformulier) overgenomen. Bij een album blijft het veld voor de albumtitel beschikbaar.
+De roze reiskaderstijl bevat het video-icoon, de titel en subtiele roze
 drukwerkdetails uit het Thailand-fotoboek.
 
 De stijl **Startbeeld-filmkaart** voegt een lokaal gekozen startbeeld als brede

@@ -219,7 +219,7 @@ function adminPage(result = "") {
               <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
               <div class="actions">
                 <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
-                <button class="design" type="button" data-url="${escapeHtml(url)}" data-title="${escapeHtml(path.parse(relativePath).name)}">Ontwerp kader</button>
+                <button class="design" type="button" data-url="${escapeHtml(url)}" data-id="${escapeHtml(id)}" data-title="${escapeHtml(parseVideoLabel(relativePath).activity)}" data-city="${escapeHtml(parseVideoLabel(relativePath).city)}" data-step="${escapeHtml(parseVideoLabel(relativePath).step)}">Ontwerp kader</button>
                 <a class="button secondary" href="/admin/qr/${encodeURIComponent(id)}">Download QR</a>
               </div>
             </article>`;
@@ -298,8 +298,14 @@ function adminPage(result = "") {
         <label>URL
           <input id="design-url" type="url" value="${escapeHtml(BASE_URL)}" placeholder="https://…" />
         </label>
-        <label>Titel
-          <input id="design-title" type="text" maxlength="42" value="VIDEO" placeholder="Bijvoorbeeld TUKTUK" />
+        <label>Stapnummer
+          <input id="design-step" type="text" maxlength="12" placeholder="Optioneel" />
+        </label>
+        <label>Stad / plaats
+          <input id="design-city" type="text" maxlength="60" placeholder="Bijvoorbeeld Bangkok" />
+        </label>
+        <label>Activiteit / albumtitel
+          <input id="design-title" type="text" maxlength="80" value="VIDEO" placeholder="Bijvoorbeeld Fietsen" />
         </label>
         <label>Stijl
           <select id="design-style">
@@ -366,6 +372,8 @@ function adminPage(result = "") {
     const context = canvas.getContext("2d", { alpha: true });
     const urlInput = document.getElementById("design-url");
     const titleInput = document.getElementById("design-title");
+    const cityInput = document.getElementById("design-city");
+    const stepInput = document.getElementById("design-step");
     const styleInput = document.getElementById("design-style");
     const imageInput = document.getElementById("design-image");
     const backgroundInput = document.getElementById("design-background");
@@ -457,8 +465,12 @@ function adminPage(result = "") {
       context.restore();
     }
 
-    function drawDesign(city = "") {
-      if (typeof city !== "string") city = "";
+    function cardCaption(step, city) {
+      return [step.trim() ? "Stap " + step.trim() : "", city.trim()].filter(Boolean).join(" · ");
+    }
+
+    function drawDesign(city = cardCaption(stepInput.value, cityInput.value)) {
+      if (typeof city !== "string") city = cardCaption(stepInput.value, cityInput.value);
       const title = (titleInput.value.trim() || "VIDEO").toUpperCase();
       const pink = styleInput.value === "pink";
       const photo = styleInput.value === "photo";
@@ -606,7 +618,7 @@ function adminPage(result = "") {
     }
 
     function downloadBlob(blob, extension) {
-      const slug = (titleInput.value.trim() || "video").normalize("NFKD").replace(/[\\u0300-\\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
+      const slug = fileSlug([stepInput.value.trim(), cityInput.value.trim(), titleInput.value.trim()].filter(Boolean).join("-"));
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
       link.download = "qr-" + (slug || "video") + "." + extension;
@@ -711,7 +723,7 @@ function adminPage(result = "") {
           if (!city || !activity) throw new Error("Vul voor elke video een stadsnaam en activiteit in.");
           status.textContent = "Kaart " + (index + 1) + " van " + rows.length + ": " + city + " · " + activity;
           const step = row.querySelector(".batch-step").value.trim();
-          const caption = step ? "Stap " + step + " · " + city : city;
+          const caption = cardCaption(step, city);
           const bytes = await cardBytes(row.dataset.url, activity, caption, row.dataset.id);
           files.push({ name: String(index + 1).padStart(3, "0") + "-" + fileSlug([step, city, activity].filter(Boolean).join("-")) + ".png", bytes });
         }
@@ -736,7 +748,10 @@ function adminPage(result = "") {
     document.querySelectorAll(".design").forEach((button) => {
       button.addEventListener("click", () => {
         urlInput.value = button.dataset.url;
-        titleInput.value = button.dataset.title;
+        const row = [...document.querySelectorAll(".batch-row")].find(row => row.dataset.id === button.dataset.id);
+        titleInput.value = row ? row.querySelector(".batch-activity").value : button.dataset.title;
+        cityInput.value = row ? row.querySelector(".batch-city").value : button.dataset.city || "";
+        stepInput.value = row ? row.querySelector(".batch-step").value : button.dataset.step || "";
         document.getElementById("qr-studio").scrollIntoView({ behavior: "smooth", block: "start" });
         updateQr();
       });
@@ -747,6 +762,8 @@ function adminPage(result = "") {
       qrTimer = setTimeout(updateQr, 300);
     });
     titleInput.addEventListener("input", drawDesign);
+    cityInput.addEventListener("input", drawDesign);
+    stepInput.addEventListener("input", drawDesign);
     styleInput.addEventListener("change", drawDesign);
     imageInput.addEventListener("change", () => {
       const file = imageInput.files && imageInput.files[0];
