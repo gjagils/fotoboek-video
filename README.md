@@ -195,3 +195,14 @@ Een mislukte kopie activeert het vinkje niet.
 
 Ontwikkelcontrole: `npm test` test onder andere dat verwijderen, vervangen en
 opnieuw scannen de bevroren links en Range-requests intact laat.
+
+### Zuid-Afrika 2025
+
+`/gallery?folder=zuid-afrika` heeft een eigen safarithema met terracotta,
+reisdagboekpapier, jeep en verrekijker. Deze pagina is alvast beschikbaar voordat
+er video's zijn toegevoegd. Plaats de MP4's in `videos/zuid-afrika/` en scan ze
+via Beheer; de thumbnails en bestaande afspeellinks verschijnen automatisch.
+Gebruik bijvoorbeeld `Tussen de leeuwen.mp4` voor de eerste film.
+Andere mapnamen kunnen via Beheer het thema **Zuid-Afrika · Op safari** kiezen.
+Titel en subtitel zijn aanpasbaar. Ook dit thema wordt bij albumbevriezing
+zelfstandig gearchiveerd, inclusief de vormgeving en headerillustratie.

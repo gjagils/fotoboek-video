@@ -112,6 +112,8 @@ function saveGallerySettings(settings) {
 
 function defaultGallerySettings(folder) {
   const isThailand = folder.toLocaleLowerCase("nl") === "thailand";
+  const isSafari = /^zuid[ _-]?afrika(?:[ _-]?2025)?$/i.test(folder);
+  if (isSafari) return { theme: "safari", title: "ONZE ZUID-AFRIKA FILMS", subtitle: "ZUID-AFRIKA · 2025" };
   return {
     theme: isThailand ? "thailand" : "default",
     title: isThailand ? "ONZE THAILAND FILMS" : folder,
@@ -202,6 +204,7 @@ function adminPage(result = "") {
                   <select name="theme">
                     <option value="default"${settings.theme === "default" ? " selected" : ""}>Standaard</option>
                     <option value="thailand"${settings.theme === "thailand" ? " selected" : ""}>Thailand-reisdagboek</option>
+                    <option value="safari"${settings.theme === "safari" ? " selected" : ""}>Zuid-Afrika · Op safari</option>
                   </select>
                 </label>
                 <label>Paginatitel
@@ -927,7 +930,7 @@ app.post("/admin/gallery-settings", requireAdmin, async (req, res) => {
   const subtitle = String(req.body.subtitle || "").trim().slice(0, 120);
   const mapping = loadMapping();
 
-  if (!mappedFolders(mapping).includes(folder) || !["default", "thailand"].includes(theme)) {
+  if (!mappedFolders(mapping).includes(folder) || !["default", "thailand", "safari"].includes(theme)) {
     res.status(400).type("html").send(adminPage("Ongeldige vakantie-instellingen."));
     return;
   }
@@ -1122,7 +1125,7 @@ function renderGallery(req, res) {
   const mapping = loadMapping();
   const folders = mappedFolders(mapping);
 
-  if (requestedFolder !== null && !folders.includes(requestedFolder)) {
+  if (requestedFolder !== null && !folders.includes(requestedFolder) && requestedFolder !== "zuid-afrika") {
     res.status(404).send("Vakantie-album niet gevonden.");
     return;
   }
@@ -1144,6 +1147,49 @@ function renderGallery(req, res) {
     ? null
     : { ...defaultGallerySettings(requestedFolder), ...storedSettings[requestedFolder] };
   const pageTitle = activeSettings?.title || "Video's";
+
+  if (activeSettings?.theme === "safari") {
+    const videos = groups.get(requestedFolder) || [];
+    const cards = videos.map(({ id, name }, index) => `
+      <article class="safari-film">
+        <a href="/v?id=${encodeURIComponent(id)}" aria-label="Bekijk ${escapeHtml(name)}">
+          <div class="safari-film__image">
+            <img src="/thumb/${encodeURIComponent(id)}" alt="${escapeHtml(name)}" loading="lazy" />
+            <span class="safari-play" aria-hidden="true">▶</span>
+          </div>
+          <div class="safari-film__caption"><span class="safari-number">${String(index + 1).padStart(2, "0")}</span><h2>${escapeHtml(name)}</h2><span aria-hidden="true">↗</span></div>
+        </a>
+      </article>`).join("");
+    res.status(200).type("html").send(`<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="${escapeHtml(activeSettings.subtitle || activeSettings.title)}" />
+  <title>${escapeHtml(activeSettings.title)}</title>
+  <link rel="stylesheet" href="/assets/safari-films.css" />
+</head>
+<body class="safari-page">
+  <header class="safari-hero">
+    <img class="safari-hero__art" src="/assets/safari-header.jpg" alt="" aria-hidden="true" />
+    <div class="safari-hero__content">
+      <p class="safari-eyebrow">Ons reisdagboek in beeld</p>
+      <h1>${escapeHtml(activeSettings.title).replace(/ZUID-AFRIKA/g, "ZUID&#8209;AFRIKA")}</h1>
+      ${activeSettings.subtitle ? `<p class="safari-subtitle">${escapeHtml(activeSettings.subtitle)}</p>` : ""}
+      <span class="safari-stamp">OP SAFARI</span>
+    </div>
+  </header>
+  <main class="safari-main">
+    <a class="safari-back" href="/gallery">← Alle vakanties</a>
+    <div class="safari-section"><h2>Een wild mooi avontuur</h2><span>${videos.length} ${videos.length === 1 ? "film" : "films"}</span></div>
+    <p class="safari-intro">Nog even terug. Naar het hoge gras, de rode aarde en alles wat we onderweg tegenkwamen.</p>
+    ${videos.length ? `<div class="safari-grid">${cards}</div>` : `<div class="safari-empty"><span class="safari-stamp">BINNENKORT</span><h2>De reis krijgt hier een vervolg.</h2><p>Onze eerste safarifilm verschijnt hier binnenkort.</p></div>`}
+  </main>
+  <footer class="safari-footer"><p>${escapeHtml(activeSettings.subtitle || requestedFolder)}</p><span>Herinneringen om opnieuw te beleven.</span></footer>
+</body>
+</html>`);
+    return;
+  }
 
   if (activeSettings?.theme === "thailand") {
     const videos = groups.get(requestedFolder) || [];

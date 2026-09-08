@@ -1,0 +1,40 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'safari-gallery-'));
+process.env.DATA_DIR = path.join(root, 'data');
+process.env.VIDEOS_DIR = path.join(root, 'videos');
+process.env.ADMIN_PASSWORD = 'test-only';
+fs.mkdirSync(process.env.DATA_DIR, {recursive:true});
+const {app} = require('../server');
+const {freezeAlbum} = require('../freeze');
+const {loadArchive} = require('../archive');
+const json = (name, value) => fs.writeFileSync(path.join(process.env.DATA_DIR,name),JSON.stringify(value));
+test('safari starts empty, lists only its videos, saves settings and freezes its own artwork', async () => {
+ json('mapping.json',{});
+ const server = app.listen(0,'127.0.0.1');
+ await new Promise(resolve=>server.once('listening',resolve));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ try {
+  const empty=await fetch(base+'/gallery?folder=zuid-afrika');
+  assert.equal(empty.status,200);
+  assert.match(await empty.text(),/Onze eerste safarifilm/);
+  assert.equal((await fetch(base+'/gallery?folder=unknown')).status,404);
+  json('mapping.json',{'aabbccddee':'zuid-afrika/Tussen de leeuwen.mp4','1122334455':'thailand/Tempel.mp4'});
+  const html=await (await fetch(base+'/gallery?folder=zuid-afrika')).text();
+  assert.match(html,/safari-films.css/);assert.match(html,/Tussen de leeuwen/);assert.match(html,/1 film/);assert.doesNotMatch(html,/Tempel/);
+  assert.match(await (await fetch(base+'/gallery?folder=thailand')).text(),/thailand-films.css/);
+  const save=await fetch(base+'/admin/gallery-settings',{method:'POST',headers:{authorization:'Basic '+Buffer.from('admin:test-only').toString('base64'),'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({folder:'zuid-afrika',theme:'safari',title:'Safari <2025>',subtitle:'Op pad'})});
+  assert.equal(save.status,200);
+  assert.match(await(await fetch(base+'/gallery?folder=zuid-afrika')).text(),/Safari &lt;2025&gt;/);
+  fs.mkdirSync(path.join(process.env.VIDEOS_DIR,'zuid-afrika'),{recursive:true});
+  fs.writeFileSync(path.join(process.env.VIDEOS_DIR,'zuid-afrika/Tussen de leeuwen.mp4'),'video');
+  await freezeAlbum('zuid-afrika');
+  const archive=loadArchive(process.env.DATA_DIR).albums['zuid-afrika'];
+  const frozen=fs.readFileSync(path.join(archive.directory,'gallery.html'),'utf8');
+  assert.match(frozen,/data:image\/jpeg;base64/);assert.doesNotMatch(frozen,/href="\/assets\/safari-films.css"/);
+ } finally {await new Promise(resolve=>server.close(resolve));}
+});
+test.after(()=>fs.rmSync(root,{recursive:true,force:true}));

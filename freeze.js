@@ -47,6 +47,8 @@ async function freezeAlbum(folder) {
       let gallery = capturePage(renderGallery, { folder });
       gallery = gallery.replace('<link rel="stylesheet" href="/thailand-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'thailand-films.css'), 'utf8')}</style>`)
         .replace('src="/assets/thailand-header-decoration.svg"', () => `src="data:image/svg+xml;base64,${fs.readFileSync(path.join(__dirname, 'assets/thailand-header-decoration.svg')).toString('base64')}"`);
+      gallery = gallery.replace('<link rel="stylesheet" href="/assets/safari-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'assets/safari-films.css'), 'utf8')}</style>`)
+        .replace('src="/assets/safari-header.jpg"', () => `src="data:image/jpeg;base64,${fs.readFileSync(path.join(__dirname, 'assets/safari-header.jpg')).toString('base64')}"`);
       await fs.promises.writeFile(path.join(staging, 'gallery.html'), gallery);
       for (const [id, relativePath] of entries) {
         if (!/^[a-f0-9]{10}$/.test(id)) throw new Error('Ongeldige video-ID');
