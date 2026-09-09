@@ -1226,15 +1226,32 @@ app.use("/assets", express.static(path.join(__dirname, "assets"), {
 
 // Publieke galerij: overzicht van alle video's per map, met thumbnails,
 // zodat je ze ook aan mensen kunt laten zien zonder het fotoboek erbij.
+app.get("/", renderAlbumIndex);
+function renderAlbumIndex(req, res) {
+  const mapping = loadMapping();
+  const settings = loadGallerySettings();
+  const archive = loadArchive(DATA_DIR);
+  const folders = [...new Set([...mappedFolders(mapping), ...Object.keys(archive.albums), "zuid-afrika",
+    ...(Object.values(mapping).some(file => path.dirname(file) === ".") ? ["."] : [])])].sort((a, b) => a.localeCompare(b, "nl"));
+  const albums = folders.map(folder => {
+    const active = { ...defaultGallerySettings(folder), ...settings[folder] };
+    const entries = Object.entries(mapping).filter(([, file]) => path.dirname(file) === folder).sort((a, b) => a[1].localeCompare(b[1], "nl"));
+    const first = entries.find(([id]) => archive.videos[id]?.hasThumbnail || fs.existsSync(path.join(THUMB_DIR, `${id}.jpg`)));
+    return { folder, title: folder === "." ? "Overige herinneringen" : active.title, subtitle: active.subtitle,
+      count: entries.length, cover: first ? `/thumb/${encodeURIComponent(first[0])}` : active.theme === "safari" ? "/assets/safari-header.jpg" : null };
+  });
+  res.set("Cache-Control", "no-store").type("html").send(require("./album-index")(albums));
+}
 app.get("/gallery", renderGallery);
 function renderGallery(req, res) {
+  if (req.query.folder === undefined) return renderAlbumIndex(req, res);
   const requestedFolder = typeof req.query.folder === "string" ? req.query.folder : null;
   const archived = loadArchive(DATA_DIR).albums[requestedFolder];
   if (archived) { res.sendFile(path.join(archived.directory, "gallery.html")); return; }
   const mapping = loadMapping();
   const folders = mappedFolders(mapping);
 
-  if (requestedFolder !== null && !folders.includes(requestedFolder) && requestedFolder !== "zuid-afrika") {
+  if (requestedFolder !== null && !folders.includes(requestedFolder) && !(requestedFolder === "." && Object.values(mapping).some(file => path.dirname(file) === ".")) && requestedFolder !== "zuid-afrika") {
     res.status(404).send("Vakantie-album niet gevonden.");
     return;
   }

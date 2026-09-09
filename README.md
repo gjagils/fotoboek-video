@@ -101,8 +101,8 @@ wordt lokaal in de browser samengesteld.
 
 ## Galerij-pagina
 
-`/gallery` toont alle video's gegroepeerd per (sub)map, met een thumbnail van het
-eerste frame, zodat je ze ook zonder fotoboek aan mensen kunt laten zien. Deze
+`/` en `/gallery` tonen alle vakantiealbums als kaarten. Elke kaart opent de
+bijbehorende publieke albumpagina met video's. Deze
 pagina is publiek (geen ID nodig) — deel de link dus alleen met wie de video's mag
 zien.
 
@@ -206,3 +206,7 @@ Gebruik bijvoorbeeld `Tussen de leeuwen.mp4` voor de eerste film.
 Andere mapnamen kunnen via Beheer het thema **Zuid-Afrika · Op safari** kiezen.
 Titel en subtitel zijn aanpasbaar. Ook dit thema wordt bij albumbevriezing
 zelfstandig gearchiveerd, inclusief de vormgeving en headerillustratie.
+
+### Publieke startpagina
+
+`/` en `/gallery` tonen een rustig albumoverzicht zonder login. Iedere kaart opent de bestaande `/gallery?folder=…`-pagina. Het overzicht gebruikt albumtitels en ondertitels uit beheer en toont ook bevroren albums en de bestaande Zuid-Afrika-preview. Losse video’s staan onder Overige herinneringen. `/admin` blijft beveiligd. Alle bestaande galerijen zijn publiek; het overzicht maakt ze direct vindbaar. De startpagina vraagt zoekmachines om niet te indexeren (dit is geen toegangsbeveiliging).
