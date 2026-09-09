@@ -93,6 +93,16 @@ function folderQrFileName(folder) {
   return `${readableName}--${suffix}.png`;
 }
 
+function fileSlug(value) {
+  return String(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase()
+    .slice(0, 120) || "kaart";
+}
+
 function mappedFolders(mapping) {
   return [...new Set(Object.values(mapping)
     .map((relativePath) => path.dirname(relativePath))
@@ -176,54 +186,104 @@ function adminPage(result = "") {
   const folders = mappedFolders(mapping);
   const gallerySettings = loadGallerySettings();
   const frozenAlbums = loadArchive(DATA_DIR).albums;
+  const videosByFolder = new Map(folders.map((folder) => [folder, videos.filter(([, relativePath]) => path.dirname(relativePath) === folder)]));
   const foldersHtml = folders.length
-    ? `<section>
-        <h2>Vakantie-albums</h2>
-        <div class="videos">
+    ? `<section class="album-workspace">
+        <aside class="album-menu" aria-label="Vakantie-albums">
+          <h2>Albums</h2>
           ${folders.map((folder) => {
+            const settings = { ...defaultGallerySettings(folder), ...gallerySettings[folder] };
+            const count = videosByFolder.get(folder).length;
+            return `<a href="#album-${escapeHtml(fileSlug(folder))}">
+              <span>${escapeHtml(folder)}</span>
+              <small>${count} ${count === 1 ? "film" : "films"} · ${escapeHtml(settings.theme)}</small>
+            </a>`;
+          }).join("")}
+        </aside>
+        <div class="album-panels">
+          ${folders.map((folder) => {
+            const folderVideos = videosByFolder.get(folder);
+            const count = folderVideos.length;
             const url = `${BASE_URL}/gallery?folder=${encodeURIComponent(folder)}`;
             const settings = { ...defaultGallerySettings(folder), ...gallerySettings[folder] };
-            return `<article>
-              <strong>${escapeHtml(folder)}</strong>
-              <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
-              <div class="actions">
-                <button class="copy" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
-                <button class="design" type="button" data-url="${escapeHtml(url)}" data-title="${escapeHtml(settings.title)}">Ontwerp kader</button>
-                <a class="button secondary" href="/admin/folder-qr?folder=${encodeURIComponent(folder)}">Download QR</a>
-              </div>
-              <form method="post" action="/admin/freeze" class="freeze-settings">
-                <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
-                <label><input type="checkbox" name="freeze" value="yes" required${frozenAlbums[folder] ? " checked disabled" : ""} /> Fotoboek besteld — dit album blijvend bevriezen</label>
-                <small>${frozenAlbums[folder] ? `Bevroren op ${escapeHtml(new Date(frozenAlbums[folder].frozenAt).toLocaleDateString("nl-NL"))}. De gedrukte QR-links gebruiken het archief. Nieuwe editie? Gebruik een andere map.` : "Bewaart een aparte kopie van de huidige video's en pagina's. Bestaande QR-links blijven deze editie openen. Dit kost extra schijfruimte. Neem het archief mee in je NAS-back-up."}</small>
-                ${frozenAlbums[folder] ? "" : '<button type="submit">Album bevriezen</button>'}
-              </form>
-              <form class="album-settings" method="post" action="/admin/gallery-settings">
-                <fieldset${frozenAlbums[folder] ? " disabled" : ""} style="display:contents">
-                <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
-                <label>Vormgeving
-                  <select name="theme">
-                    <option value="default"${settings.theme === "default" ? " selected" : ""}>Standaard</option>
-                    <option value="thailand"${settings.theme === "thailand" ? " selected" : ""}>Thailand-reisdagboek</option>
-                    <option value="safari"${settings.theme === "safari" ? " selected" : ""}>Zuid-Afrika · Op safari</option>
-                  </select>
-                </label>
-                <label>Paginatitel
-                  <input name="title" maxlength="80" value="${escapeHtml(settings.title)}" />
-                </label>
-                <label>Subtitel
-                  <input name="subtitle" maxlength="120" value="${escapeHtml(settings.subtitle)}" />
-                </label>
-                <button type="submit">Instellingen opslaan</button>
-                </fieldset>
-              </form>
+            return `<article class="album-panel" id="album-${escapeHtml(fileSlug(folder))}">
+              <header class="album-header">
+                <div>
+                  <span class="eyebrow">Album</span>
+                  <h2>${escapeHtml(folder)}</h2>
+                  <p>${count} ${count === 1 ? "film" : "films"} · ${frozenAlbums[folder] ? "bevroren editie" : "actieve editie"}</p>
+                </div>
+                <div class="actions">
+                  <a class="button" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open pagina</a>
+                  <button class="copy secondary" type="button" data-url="${escapeHtml(url)}">Kopieer link</button>
+                </div>
+              </header>
+              <details class="album-section" open>
+                <summary>Video's</summary>
+                <div class="videos">
+                  ${folderVideos.map(([id, relativePath]) => {
+                    const label = parseVideoLabel(relativePath);
+                    const videoUrl = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
+                    return `<article>
+                      <strong>${escapeHtml(label.activity)}</strong>
+                      <small>${escapeHtml(relativePath)}</small>
+                      <a href="${escapeHtml(videoUrl)}" target="_blank" rel="noopener">${escapeHtml(videoUrl)}</a>
+                      <div class="actions">
+                        <button class="copy" type="button" data-url="${escapeHtml(videoUrl)}">Kopieer link</button>
+                        <button class="design" type="button" data-url="${escapeHtml(videoUrl)}" data-id="${escapeHtml(id)}" data-title="${escapeHtml(label.activity)}" data-city="${escapeHtml(label.city)}" data-step="${escapeHtml(label.step)}">Ontwerp kader</button>
+                        <a class="button secondary" href="/admin/qr/${encodeURIComponent(id)}">Download QR</a>
+                      </div>
+                    </article>`;
+                  }).join("") || '<p class="empty">Nog geen video&apos;s in dit album.</p>'}
+                </div>
+              </details>
+              <details class="album-section">
+                <summary>QR-kaarten</summary>
+                <div class="actions">
+                  <button class="design" type="button" data-url="${escapeHtml(url)}" data-title="${escapeHtml(settings.title)}">Ontwerp albumkaart</button>
+                  <a class="button secondary" href="/admin/folder-qr?folder=${encodeURIComponent(folder)}">Download album-QR</a>
+                  <a class="button secondary" href="#batch-studio">Download ZIP</a>
+                </div>
+              </details>
+              <details class="album-section">
+                <summary>Vormgeving</summary>
+                <form class="album-settings" method="post" action="/admin/gallery-settings">
+                  <fieldset${frozenAlbums[folder] ? " disabled" : ""} style="display:contents">
+                  <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
+                  <label>Vormgeving
+                    <select name="theme">
+                      <option value="default"${settings.theme === "default" ? " selected" : ""}>Standaard</option>
+                      <option value="thailand"${settings.theme === "thailand" ? " selected" : ""}>Thailand-reisdagboek</option>
+                      <option value="safari"${settings.theme === "safari" ? " selected" : ""}>Zuid-Afrika · Op safari</option>
+                    </select>
+                  </label>
+                  <label>Paginatitel
+                    <input name="title" maxlength="80" value="${escapeHtml(settings.title)}" />
+                  </label>
+                  <label>Subtitel
+                    <input name="subtitle" maxlength="120" value="${escapeHtml(settings.subtitle)}" />
+                  </label>
+                  <button type="submit">Instellingen opslaan</button>
+                  </fieldset>
+                </form>
+              </details>
+              <details class="album-section">
+                <summary>Bewaren</summary>
+                <form method="post" action="/admin/freeze" class="freeze-settings">
+                  <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
+                  <label><input type="checkbox" name="freeze" value="yes" required${frozenAlbums[folder] ? " checked disabled" : ""} /> Fotoboek besteld — dit album blijvend bevriezen</label>
+                  <small>${frozenAlbums[folder] ? `Bevroren op ${escapeHtml(new Date(frozenAlbums[folder].frozenAt).toLocaleDateString("nl-NL"))}. De gedrukte QR-links gebruiken het archief. Nieuwe editie? Gebruik een andere map.` : "Bewaart een aparte kopie van de huidige video's en pagina's. Bestaande QR-links blijven deze editie openen. Dit kost extra schijfruimte. Neem het archief mee in je NAS-back-up."}</small>
+                  ${frozenAlbums[folder] ? "" : '<button type="submit">Album bevriezen</button>'}
+                </form>
+              </details>
             </article>`;
           }).join("")}
         </div>
       </section>`
     : "";
   const videosHtml = videos.length
-    ? `<section>
-        <h2>Videolinks</h2>
+    ? `<details class="all-links">
+        <summary>Alle losse videolinks</summary>
         <div class="videos">
           ${videos.map(([id, relativePath]) => {
             const url = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
@@ -238,7 +298,7 @@ function adminPage(result = "") {
             </article>`;
           }).join("")}
         </div>
-      </section>`
+      </details>`
     : `<p class="empty">Nog geen video's verwerkt.</p>`;
 
   return `<!DOCTYPE html>
@@ -248,15 +308,40 @@ function adminPage(result = "") {
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Fotoboek-video beheer</title>
   <style>
-    body { max-width: 760px; margin: 48px auto; padding: 0 20px; font: 16px/1.5 system-ui, sans-serif; color: #1f2937; }
-    button, .button { border: 0; border-radius: 8px; padding: 12px 18px; background: #2563eb; color: white; font: inherit; cursor: pointer; text-decoration: none; }
+    :root { color-scheme: light; --bg: #f6f4ef; --panel: #ffffff; --line: #d7d0c2; --text: #1f2937; --muted: #6b7280; --green: #315b45; --blue: #2563eb; --terracotta: #a94f2b; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; padding: 32px; font: 16px/1.5 system-ui, sans-serif; color: var(--text); background: var(--bg); }
+    main { max-width: 1180px; margin: 0 auto; }
+    button, .button { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; padding: 10px 14px; background: var(--blue); color: white; font: inherit; cursor: pointer; text-decoration: none; white-space: nowrap; }
     button:hover, .button:hover { background: #1d4ed8; }
     .button.secondary, button.secondary { background: #374151; }
     .button.secondary:hover, button.secondary:hover { background: #1f2937; }
-    pre { margin-top: 24px; padding: 16px; overflow: auto; border-radius: 8px; background: #f3f4f6; white-space: pre-wrap; }
-    section { margin-top: 36px; }
-    .studio { padding: 24px; border: 1px solid #f2bdd2; border-radius: 18px; background: #fff8fb; box-shadow: 0 18px 45px rgba(143, 20, 72, .08); }
-    .studio h2 { margin: 0 0 4px; font-family: Georgia, serif; font-size: 30px; color: #7d123f; }
+    pre { margin-top: 18px; padding: 16px; overflow: auto; border-radius: 8px; background: #fff; white-space: pre-wrap; border: 1px solid var(--line); }
+    section { margin-top: 24px; }
+    .topbar { display: flex; justify-content: space-between; gap: 20px; align-items: end; margin-bottom: 22px; }
+    .topbar h1 { margin: 0; font: 700 34px/1.1 Georgia, serif; color: var(--green); }
+    .topbar p { margin: 8px 0 0; color: var(--muted); }
+    .album-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
+    .album-menu { position: sticky; top: 24px; display: grid; gap: 8px; padding: 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .album-menu h2 { margin: 0 0 8px; font-size: 15px; color: var(--green); }
+    .album-menu a { display: grid; gap: 2px; padding: 10px 12px; border-radius: 6px; color: var(--text); text-decoration: none; border-left: 4px solid transparent; }
+    .album-menu a:hover, .album-menu a:focus { background: #f3f0e7; border-left-color: var(--terracotta); outline: 0; }
+    .album-menu small, .album-header p, article small { color: var(--muted); }
+    .album-panels { display: grid; gap: 16px; }
+    .album-panel { display: block; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+    .album-header { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 18px; border-bottom: 1px solid var(--line); background: #fbfaf6; }
+    .album-header h2 { margin: 2px 0 4px; font: 700 26px/1.1 Georgia, serif; color: var(--green); }
+    .album-header p { margin: 0; }
+    .eyebrow { color: var(--terracotta); font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+    .album-section, .utility-panel { border-top: 1px solid var(--line); }
+    .utility-panel { margin-top: 24px; }
+    .album-section:first-of-type { border-top: 0; }
+    .album-section summary, .utility-panel summary { cursor: pointer; padding: 14px 18px; font-weight: 800; color: var(--green); list-style-position: inside; }
+    .album-section[open] summary, .utility-panel[open] summary { border-bottom: 1px solid var(--line); background: #faf8f1; }
+    .album-section > .videos, .album-section > .actions, .album-section > form, .utility-panel > .videos, .utility-panel > .studio-body { padding: 16px 18px 18px; }
+    .studio { border: 1px solid #f2bdd2; border-radius: 8px; background: #fff8fb; box-shadow: 0 14px 30px rgba(143, 20, 72, .08); overflow: hidden; }
+    .studio h2 { margin: 0 0 4px; font-family: Georgia, serif; font-size: 28px; color: #7d123f; }
     .studio-intro { margin: 0 0 22px; color: #765565; }
     .studio-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
     .fields { display: grid; gap: 16px; }
@@ -268,13 +353,14 @@ function adminPage(result = "") {
     .preview-shell.transparent { background-color: #f7f7f7; background-image: linear-gradient(45deg, #e6e6e6 25%, transparent 25%), linear-gradient(-45deg, #e6e6e6 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e6e6e6 75%), linear-gradient(-45deg, transparent 75%, #e6e6e6 75%); background-size: 24px 24px; background-position: 0 0, 0 12px, 12px -12px, -12px 0; }
     #qr-canvas { display: block; width: 100%; height: auto; background: transparent; }
     .print-note { margin: 10px 0 0; color: #806573; font-size: 13px; text-align: center; }
-    .videos { display: grid; gap: 12px; }
-    article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 16px; border: 1px solid #d1d5db; border-radius: 10px; }
-    article strong, article > a { overflow-wrap: anywhere; }
+    .videos { display: grid; gap: 10px; }
+    article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; padding: 14px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+    article strong, article > a, article small { overflow-wrap: anywhere; }
     article > a { color: #1d4ed8; }
-    article .actions { grid-column: 2; grid-row: 1 / span 2; align-self: center; display: flex; gap: 8px; }
-    .album-settings { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; margin-top: 12px; padding-top: 14px; border-top: 1px dashed #d1d5db; }
-    .freeze-settings { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid #d1d5db; }
+    article .actions, .actions { align-self: center; display: flex; gap: 8px; flex-wrap: wrap; }
+    article .actions { grid-column: 2; grid-row: 1 / span 3; }
+    .album-settings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 10px; align-items: end; }
+    .freeze-settings { display: grid; gap: 10px; }
     .freeze-settings input[type="checkbox"] { width: auto; }
     .album-settings label { font-size: 13px; }
     .album-settings button { white-space: nowrap; }
@@ -288,8 +374,12 @@ function adminPage(result = "") {
     #download-all { margin-top: 18px; background: #bf175d; }
     button:disabled { opacity: .55; cursor: wait; }
     .empty { margin-top: 32px; color: #6b7280; }
-    @media (max-width: 600px) {
-      .studio { padding: 18px; }
+    .all-links { max-width: 1180px; margin: 24px auto 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    @media (max-width: 760px) {
+      body { padding: 18px; }
+      .topbar, .album-header { display: grid; align-items: start; }
+      .album-workspace { grid-template-columns: 1fr; }
+      .album-menu { position: static; }
       .studio-grid { grid-template-columns: 1fr; }
       .preview-shell { max-width: 320px; }
       article { grid-template-columns: 1fr; }
@@ -299,15 +389,23 @@ function adminPage(result = "") {
   </style>
 </head>
 <body>
-  <h1>Fotoboek-video beheer</h1>
-  <p>Scan de videomap en maak ontbrekende geheime links en QR-codes aan.</p>
-  <form method="post" action="/admin/generate">
-    <button type="submit">Video's scannen en QR-codes genereren</button>
-  </form>
+  <main>
+  <header class="topbar">
+    <div>
+      <h1>Fotoboek-video beheer</h1>
+      <p>Kies links een album en beheer daar de video's, QR-kaarten, vormgeving en bevroren editie.</p>
+    </div>
+    <form method="post" action="/admin/generate">
+      <button type="submit">Video's scannen en QR-codes genereren</button>
+    </form>
+  </header>
   ${resultHtml}
-  <section class="studio" id="qr-studio">
+  ${foldersHtml}
+  <details class="studio utility-panel" id="qr-studio">
+    <summary>Ontwerpstudio voor QR-kaarten</summary>
+    <div class="studio-body">
     <h2>QR Studio</h2>
-    <p class="studio-intro">Maak een drukklare QR-kaart voor het Thailand-fotoboek.</p>
+    <p class="studio-intro">Maak een drukklare QR-kaart voor je fotoboek.</p>
     <div class="studio-grid">
       <div class="fields">
         <label>URL
@@ -349,8 +447,11 @@ function adminPage(result = "") {
         <p class="print-note" id="print-note">Transparante PNG · 1800 × 2250 px · 300 dpi</p>
       </div>
     </div>
-  </section>
-  <section class="studio" id="batch-studio">
+    </div>
+  </details>
+  <details class="studio utility-panel" id="batch-studio">
+    <summary>Vakantiealbum downloaden</summary>
+    <div class="studio-body">
     <h2>Vakantiealbum downloaden</h2>
     <p>Kies een map: de ZIP bevat alle videokaarten uit die map én een QR-kaart voor de totaalpagina. Alle kaarten gebruiken de gekozen QR Studio-stijl en achtergrond, op 1800 × 2250 px en 300 dpi.</p>
     <form id="batch-form">
@@ -379,9 +480,10 @@ function adminPage(result = "") {
       <button id="download-all" type="submit"${folders.length ? "" : " disabled"}>Download vakantiealbum (.zip)</button>
       <p id="batch-status" role="status" aria-live="polite"></p>
     </form>
-  </section>
-  ${foldersHtml}
+    </div>
+  </details>
   ${videosHtml}
+  </main>
   <script>
     const canvas = document.getElementById("qr-canvas");
     const context = canvas.getContext("2d", { alpha: true });
@@ -767,8 +869,15 @@ function adminPage(result = "") {
         titleInput.value = row ? row.querySelector(".batch-activity").value : button.dataset.title;
         cityInput.value = row ? row.querySelector(".batch-city").value : button.dataset.city || "";
         stepInput.value = row ? row.querySelector(".batch-step").value : button.dataset.step || "";
-        document.getElementById("qr-studio").scrollIntoView({ behavior: "smooth", block: "start" });
+        const studio = document.getElementById("qr-studio");
+        studio.open = true;
+        studio.scrollIntoView({ behavior: "smooth", block: "start" });
         updateQr();
+      });
+    });
+    document.querySelectorAll('a[href="#batch-studio"]').forEach((link) => {
+      link.addEventListener("click", () => {
+        document.getElementById("batch-studio").open = true;
       });
     });
 
