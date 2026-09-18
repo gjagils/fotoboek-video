@@ -227,6 +227,37 @@ paginabezoek telt elke gebeurtenis hoogstens één keer.
 - Het bestand hoort bij je NAS-back-up als je de geschiedenis wilt houden; het
   wordt gebufferd weggeschreven (elke paar seconden en bij afsluiten).
 
+### Een al bevroren album alsnog verlichten
+
+Een album dat vóór deze wijziging bevroren is, houdt zijn oude, zware video's:
+`generate.js` blijft van bevroren albums af en een archief wordt nooit vanzelf
+vervangen. Staat het fotoboek al gedrukt, dan is een nieuwe map (nieuwe ID's,
+nieuwe QR-codes) geen optie. Daarvoor is **Bevroren editie verversen** op
+`/admin`, bij het album onder *Bewaren*:
+
+- De ID's, links en QR-codes blijven exact hetzelfde — alle codes in het gedrukte
+  boek blijven werken.
+- De video's in het archief worden vervangen door dezelfde film in de lichte
+  webversie, en de pagina's worden opnieuw vastgelegd, dus ook de bevroren editie
+  krijgt de laad-indicator en telt mee in de kijkcijfers.
+- De editie die er stond verhuist naar `data/frozen-album-backups/<sleutel>/`.
+  Bij een tweede verversing blijft die eerste, gedrukte editie staan.
+- Terug kan altijd met **Bewaarde editie terugzetten** (of
+  `node refresh.js --terug "<mapnaam>"`). Voordat er iets wordt teruggezet,
+  controleert het script elke sha256 uit het manifest; bij twijfel gebeurt er
+  niets en blijft de draaiende editie staan.
+- Het klaarzetten gebeurt in een aparte map die pas aan het eind wordt
+  omgewisseld, dus een mislukte omzetting laat nooit een halve editie achter.
+  Reken tijdens het verversen op tijdelijk wat extra schijfruimte (de nieuwe,
+  kleinere editie naast de oude) en daarna op de oude editie als back-up.
+
+Vanaf de commandoregel:
+
+```
+docker compose exec fotoboek-video node refresh.js "Thailand"
+docker compose exec fotoboek-video node refresh.js --terug "Thailand"
+```
+
 ## Beveiliging
 
 De ID's zijn random 10-tekens hex-strings (dus 16^10 mogelijkheden) — niet te raden,

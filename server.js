@@ -11,7 +11,7 @@ const crypto = require("crypto");
 const { execFile, spawn } = require("child_process");
 const express = require("express");
 const QRCode = require("qrcode");
-const { loadArchive, withDataLock } = require("./archive");
+const { archiveKey, loadArchive, withDataLock } = require("./archive");
 const { createViewCounter, recentTotals, emptyStats } = require("./views");
 const { limitsFromEnv } = require("./streaming");
 
@@ -24,6 +24,7 @@ const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const SCAN_LOG_FILE = path.join(DATA_DIR, "generate.log");
+const BACKUP_ROOT = path.join(DATA_DIR, "frozen-album-backups");
 const PORT = process.env.PORT || 3000;
 const BASE_URL = (process.env.BASE_URL || "https://albumvideo.gerdjan.nl").replace(/\/$/, "");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
@@ -37,6 +38,11 @@ let generationInProgress = false;
 // Kijkcijfers per video. Schrijft gebufferd naar data/views.json.
 const views = createViewCounter(DATA_DIR);
 process.on("exit", () => views.flush());
+
+// Staat de editie van vóór een verversing nog bewaard? Dan kun je terug.
+function hasFrozenBackup(folder) {
+  return fs.existsSync(path.join(BACKUP_ROOT, archiveKey(folder)));
+}
 
 // Laatste regels van de scan-log, voor de voortgang op de beheerpagina.
 function scanLogTail(lines = 80) {
@@ -60,8 +66,11 @@ function fileVersion(filePath) {
 }
 
 // Het bestand dat /video/<id> uitlevert: de bevroren kopie, anders de webversie
-// uit data/streamable/, anders het origineel.
-function resolveVideoFile(id, mapping = loadMapping(), archive = loadArchive(DATA_DIR)) {
+// uit data/streamable/, anders het origineel. `directory` wijst naar een editie
+// die nog klaargezet wordt (zie refresh.js), zodat de versiesleutel in een
+// vastgelegde pagina bij het bestand hoort dat straks uitgeleverd wordt.
+function resolveVideoFile(id, { mapping = loadMapping(), archive = loadArchive(DATA_DIR), directory } = {}) {
+  if (directory) return path.join(directory, `${id}.mp4`);
   const archived = archive.videos[id];
   if (archived) return path.join(archived.directory, `${id}.mp4`);
   const relativePath = mapping[id];
@@ -70,12 +79,16 @@ function resolveVideoFile(id, mapping = loadMapping(), archive = loadArchive(DAT
   return fs.existsSync(streamablePath) ? streamablePath : path.join(VIDEOS_DIR, relativePath);
 }
 
-function resolveThumbnailFile(id, mapping = loadMapping(), archive = loadArchive(DATA_DIR)) {
+function resolveThumbnailFile(id, { mapping = loadMapping(), archive = loadArchive(DATA_DIR), directory } = {}) {
+  const thumbnailIn = (folder) => {
+    const file = path.join(folder, `${id}.jpg`);
+    return fs.existsSync(file) ? file : null;
+  };
+  if (directory) return thumbnailIn(directory);
   const archived = archive.videos[id];
-  if (archived) return archived.hasThumbnail ? path.join(archived.directory, `${id}.jpg`) : null;
+  if (archived) return archived.hasThumbnail ? thumbnailIn(archived.directory) : null;
   if (!mapping[id]) return null;
-  const thumbPath = path.join(THUMB_DIR, `${id}.jpg`);
-  return fs.existsSync(thumbPath) ? thumbPath : null;
+  return thumbnailIn(THUMB_DIR);
 }
 
 // Media-URL met bestandsextensie (Cloudflare cachet .mp4 en .jpg standaard wél,
@@ -250,6 +263,7 @@ function adminPage(result = "") {
   const folders = mappedFolders(mapping);
   const gallerySettings = loadGallerySettings();
   const frozenAlbums = loadArchive(DATA_DIR).albums;
+  const frozenBackups = new Set(fs.existsSync(BACKUP_ROOT) ? fs.readdirSync(BACKUP_ROOT) : []);
   const viewCounts = views.all();
   const statsOf = (id) => viewCounts[id] || emptyStats();
   const playsInFolder = (folderVideos) => folderVideos.reduce((total, [id]) => total + statsOf(id).plays, 0);
@@ -351,9 +365,20 @@ function adminPage(result = "") {
                 <form method="post" action="/admin/freeze" class="freeze-settings">
                   <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
                   <label><input type="checkbox" name="freeze" value="yes" required${frozenAlbums[folder] ? " checked disabled" : ""} /> Fotoboek besteld — dit album blijvend bevriezen</label>
-                  <small>${frozenAlbums[folder] ? `Bevroren op ${escapeHtml(new Date(frozenAlbums[folder].frozenAt).toLocaleDateString("nl-NL"))}. De gedrukte QR-links gebruiken het archief. Nieuwe editie? Gebruik een andere map.` : "Bewaart een aparte kopie van de huidige video's en pagina's. Bestaande QR-links blijven deze editie openen. Dit kost extra schijfruimte. Neem het archief mee in je NAS-back-up."}</small>
+                  <small>${frozenAlbums[folder] ? `Bevroren op ${escapeHtml(new Date(frozenAlbums[folder].frozenAt).toLocaleDateString("nl-NL"))}${frozenAlbums[folder].refreshedAt ? `, ververst op ${escapeHtml(new Date(frozenAlbums[folder].refreshedAt).toLocaleDateString("nl-NL"))}` : ""}. De gedrukte QR-links gebruiken het archief. Nieuwe editie? Gebruik een andere map.` : "Bewaart een aparte kopie van de huidige video's en pagina's. Bestaande QR-links blijven deze editie openen. Dit kost extra schijfruimte. Neem het archief mee in je NAS-back-up."}</small>
                   ${frozenAlbums[folder] ? "" : '<button type="submit">Album bevriezen</button>'}
                 </form>
+                ${frozenAlbums[folder] ? `<form method="post" action="/admin/refresh-frozen" class="freeze-settings">
+                  <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
+                  <label><input type="checkbox" name="refresh" value="yes" required /> Video's van deze bevroren editie vervangen door lichte webversies</label>
+                  <small>Voor een album dat al gedrukt is: de ID's en links veranderen niet, dus alle QR-codes in het boek blijven werken. Het is dezelfde film, alleen zo gecodeerd dat 'ie op mobiel internet doorloopt; de pagina's krijgen meteen de laad-indicator en de kijkcijfers. De editie die er nu staat wordt bewaard.</small>
+                  <button type="submit">Bevroren editie verversen</button>
+                </form>
+                ${frozenBackups.has(archiveKey(folder)) ? `<form method="post" action="/admin/restore-frozen" class="freeze-settings">
+                  <small>Er staat een bewaarde editie klaar: die van vóór de eerste verversing — precies wat er in het gedrukte boek zat.</small>
+                  <input type="hidden" name="folder" value="${escapeHtml(folder)}" />
+                  <button class="secondary" type="submit">Bewaarde editie terugzetten</button>
+                </form>` : ""}` : ""}
               </details>
             </article>`;
           }).join("")}
@@ -1215,13 +1240,13 @@ app.post("/admin/freeze", requireAdmin, (req, res) => {
   });
 });
 
-// Een scan kan lang duren: het omzetten van zware video's naar een vlot
-// afspeelbare webversie is rekenwerk. Daarom draait de scan in de achtergrond
-// en schrijft hij naar data/generate.log; de beheerpagina toont die voortgang.
-// Zo loopt het verzoek (of de tunnel ervoor) nooit in een time-out.
-app.post("/admin/generate", requireAdmin, (req, res) => {
+// Scannen en het verversen van een bevroren editie kunnen lang duren: video's
+// omzetten is rekenwerk. Daarom draaien ze in de achtergrond en schrijven ze naar
+// data/generate.log; de beheerpagina toont die voortgang. Zo loopt het verzoek
+// (of de tunnel ervoor) nooit in een time-out.
+function startBackgroundWorker(res, { script, args = [], label, startedMessage }) {
   if (generationInProgress) {
-    res.status(409).type("html").send(adminPage("Er draait al een scan. Probeer het straks opnieuw."));
+    res.status(409).type("html").send(adminPage("Er draait al een scan of verversing. Probeer het straks opnieuw."));
     return;
   }
 
@@ -1237,11 +1262,52 @@ app.post("/admin/generate", requireAdmin, (req, res) => {
     fs.appendFileSync(SCAN_LOG_FILE, `\n${message}\n`);
   };
 
-  const scan = spawn(process.execPath, [path.join(__dirname, "generate.js")], { stdio: ["ignore", logFile, logFile] });
-  scan.on("error", (error) => finish(`Scan kon niet starten: ${error.message}`));
-  scan.on("close", (code) => finish(code === 0 ? "Scan afgerond." : `Scan gestopt (code ${code}).`));
+  const worker = spawn(process.execPath, [path.join(__dirname, script), ...args], { stdio: ["ignore", logFile, logFile] });
+  worker.on("error", (error) => finish(`${label} kon niet starten: ${error.message}`));
+  worker.on("close", (code) => finish(code === 0 ? `${label} afgerond.` : `${label} gestopt (code ${code}).`));
 
-  res.status(202).type("html").send(adminPage("Scan gestart. De voortgang staat hieronder bij 'Scan en webversies'; je kunt deze pagina open laten of later terugkomen."));
+  res.status(202).type("html").send(adminPage(startedMessage));
+}
+
+app.post("/admin/generate", requireAdmin, (req, res) => {
+  startBackgroundWorker(res, {
+    script: "generate.js",
+    label: "Scan",
+    startedMessage: "Scan gestart. De voortgang staat hieronder bij 'Scan en webversies'; je kunt deze pagina open laten of later terugkomen.",
+  });
+});
+
+// Een bevroren album versoepelen zonder de gedrukte QR-codes te breken: dezelfde
+// ID's, dezelfde links, alleen lichtere video's en bijgewerkte pagina's. De
+// editie die er nu staat wordt bewaard, zodat je altijd terug kunt.
+app.post("/admin/refresh-frozen", requireAdmin, (req, res) => {
+  const folder = typeof req.body.folder === "string" ? req.body.folder : "";
+  if (req.body.refresh !== "yes" || !loadArchive(DATA_DIR).albums[folder]) {
+    res.status(400).type("html").send(adminPage("Kies een bevroren album en vink verversen aan."));
+    return;
+  }
+
+  startBackgroundWorker(res, {
+    script: "refresh.js",
+    args: [folder],
+    label: "Verversen",
+    startedMessage: `Verversen van ${folder} gestart. De gedrukte QR-codes blijven ondertussen werken; de voortgang staat hieronder bij 'Scan en webversies'.`,
+  });
+});
+
+app.post("/admin/restore-frozen", requireAdmin, (req, res) => {
+  const folder = typeof req.body.folder === "string" ? req.body.folder : "";
+  if (!loadArchive(DATA_DIR).albums[folder] || !hasFrozenBackup(folder)) {
+    res.status(400).type("html").send(adminPage("Er is geen bewaarde editie van dit album."));
+    return;
+  }
+
+  startBackgroundWorker(res, {
+    script: "refresh.js",
+    args: ["--terug", folder],
+    label: "Terugzetten",
+    startedMessage: `De bewaarde editie van ${folder} wordt teruggezet. De voortgang staat hieronder bij 'Scan en webversies'.`,
+  });
 });
 
 app.get("/admin/scan-status", requireAdmin, (req, res) => {
@@ -1259,7 +1325,9 @@ function loadMapping() {
 app.get("/v", renderPlayer);
 function renderPlayer(req, res) {
   const id = String(req.query.id || "");
-  const archived = loadArchive(DATA_DIR).videos[id];
+  // captureLive zetten alleen freeze.js en refresh.js, om de pagina opnieuw vast
+  // te leggen; een echt verzoek krijgt altijd de vastgelegde pagina.
+  const archived = req.captureLive ? null : loadArchive(DATA_DIR).videos[id];
   if (archived) { res.sendFile(path.join(archived.directory, `${id}.html`)); return; }
   const mapping = loadMapping();
   const relativePath = mapping[id];
@@ -1272,8 +1340,9 @@ function renderPlayer(req, res) {
   const videoTitle = path.parse(relativePath).name;
   const escapedTitle = escapeHtml(videoTitle);
   const pageUrl = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
-  const videoSrc = mediaUrl("video", id, resolveVideoFile(id, mapping));
-  const posterSrc = mediaUrl("thumb", id, resolveThumbnailFile(id, mapping));
+  const media = { mapping, directory: req.mediaDirectory };
+  const videoSrc = mediaUrl("video", id, resolveVideoFile(id, media));
+  const posterSrc = mediaUrl("thumb", id, resolveThumbnailFile(id, media));
 
   const html = `<!DOCTYPE html>
 <html lang="nl">
@@ -1453,7 +1522,7 @@ function renderAlbumIndex(req, res) {
     const entries = Object.entries(mapping).filter(([, file]) => path.dirname(file) === folder).sort((a, b) => a[1].localeCompare(b[1], "nl"));
     const first = entries.find(([id]) => archive.videos[id]?.hasThumbnail || fs.existsSync(path.join(THUMB_DIR, `${id}.jpg`)));
     return { folder, title: folder === "." ? "Overige herinneringen" : active.title, subtitle: active.subtitle,
-      count: entries.length, cover: first ? mediaUrl("thumb", first[0], resolveThumbnailFile(first[0], mapping, archive)) : active.theme === "safari" ? "/assets/safari-header.jpg" : null };
+      count: entries.length, cover: first ? mediaUrl("thumb", first[0], resolveThumbnailFile(first[0], { mapping, archive })) : active.theme === "safari" ? "/assets/safari-header.jpg" : null };
   });
   res.set("Cache-Control", "no-store").type("html").send(require("./album-index")(albums));
 }
@@ -1462,11 +1531,11 @@ function renderGallery(req, res) {
   if (req.query.folder === undefined) return renderAlbumIndex(req, res);
   const requestedFolder = typeof req.query.folder === "string" ? req.query.folder : null;
   const archive = loadArchive(DATA_DIR);
-  const archived = archive.albums[requestedFolder];
+  const archived = req.captureLive ? null : archive.albums[requestedFolder];
   if (archived) { res.sendFile(path.join(archived.directory, "gallery.html")); return; }
   const mapping = loadMapping();
   const folders = mappedFolders(mapping);
-  const thumbUrl = (id) => mediaUrl("thumb", id, resolveThumbnailFile(id, mapping, archive));
+  const thumbUrl = (id) => mediaUrl("thumb", id, resolveThumbnailFile(id, { mapping, archive, directory: req.mediaDirectory }));
 
   if (requestedFolder !== null && !folders.includes(requestedFolder) && !(requestedFolder === "." && Object.values(mapping).some(file => path.dirname(file) === ".")) && requestedFolder !== "zuid-afrika") {
     res.status(404).send("Vakantie-album niet gevonden.");

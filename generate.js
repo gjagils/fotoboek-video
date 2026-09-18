@@ -13,7 +13,7 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const QRCode = require("qrcode");
 const { loadArchive, withDataLock } = require("./archive");
-const { limitsFromEnv, parseProbe, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs } = require("./streaming");
+const { limitsFromEnv, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile } = require("./streaming");
 
 const execFileAsync = promisify(execFile);
 // ffmpeg kan veel naar stderr schrijven; een ruime buffer voorkomt dat een
@@ -67,25 +67,6 @@ async function generateThumbnail(inputPath, outputPath) {
   ], FFMPEG_OPTIONS);
 }
 
-// Leest codec, resolutie en bitrate van de bron uit de stderr van een
-// ultrakorte ffmpeg-run. Zo is er geen losse ffprobe nodig.
-async function probeSource(inputPath) {
-  try {
-    const { stderr } = await execFileAsync("ffmpeg", [
-      "-hide_banner",
-      "-nostats",
-      "-i", inputPath,
-      "-t", "0.1",
-      "-f", "null",
-      "-",
-    ], FFMPEG_OPTIONS);
-    return parseProbe(stderr, fs.statSync(inputPath).size);
-  } catch (error) {
-    console.warn(`Kon eigenschappen van ${path.basename(inputPath)} niet lezen: ${error.message}`);
-    return null;
-  }
-}
-
 // Maakt de kopie waarmee de browser streamt: altijd met de moov-atom vooraan
 // ("faststart"), zodat afspelen direct kan beginnen. Webvriendelijke bronnen
 // worden alleen geremuxt (snel, geen kwaliteitsverlies); te zware bronnen
@@ -93,10 +74,9 @@ async function probeSource(inputPath) {
 // mobiel internet zonder haperen doorloopt. Het origineel in videos/ blijft
 // altijd ongewijzigd; dit is een aparte kopie in data/streamable/.
 async function generateStreamableCopy(inputPath, outputPath, plan) {
-  const args = plan.mode === "transcode"
+  await runFfmpeg(plan.mode === "transcode"
     ? transcodeArgs(inputPath, outputPath, STREAM_LIMITS)
-    : remuxArgs(inputPath, outputPath);
-  await execFileAsync("ffmpeg", args, FFMPEG_OPTIONS);
+    : remuxArgs(inputPath, outputPath));
 }
 
 async function generateAtomically(generator, inputPath, outputPath) {
@@ -301,7 +281,7 @@ async function main() {
     const streamUpToDate = previousStream === "transcode" && !sourceChanged && sourceState[id]?.streamVersion === STREAM_VERSION;
     const plan = streamUpToDate
       ? { mode: "transcode", reasons: sourceState[id]?.streamReasons || [] }
-      : chooseStreamPlan(await probeSource(sourcePath), STREAM_LIMITS);
+      : chooseStreamPlan(await probeFile(sourcePath), STREAM_LIMITS);
 
     if (sourceChanged || !previousStream || previousStream !== plan.mode) {
       try {
@@ -377,4 +357,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, probeSource };
+module.exports = { main };
