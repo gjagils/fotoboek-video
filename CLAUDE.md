@@ -38,6 +38,12 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
 - `views.js` — kijkcijfers per video in `data/views.json`, gebufferd weggeschreven.
   Alleen tellingen (geopend/gestart/uitgekeken, ook per dag); bewust geen IP-adressen
   of cookies.
+- Bevroren albums: `freeze.js` legt de dán geldende webversie en afspeelpagina vast,
+  dus een album dat ná deze wijziging bevroren wordt krijgt de nieuwe webversie,
+  `preload="auto"` en de kijkcijfers. Een album dat er al vóór stond houdt zijn
+  oude kopie: `generate.js` slaat bronnen in bevroren albums over en een archief
+  wordt nooit vervangen. Alleen opnieuw vastleggen (nieuwe editie of een expliciete
+  ververs-actie) verandert daar iets aan.
 - `server.js` — Express-app met de volgende routes:
   - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag (`preload="auto"`,
     `poster` naar `/thumb/<id>.jpg`), een laad-indicator bij haperen en een klein

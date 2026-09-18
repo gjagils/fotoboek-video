@@ -219,8 +219,11 @@ paginabezoek telt elke gebeurtenis hoogstens één keer.
   cookies, geen IP-adressen, geen bezoekersprofielen. Wie de pagina herlaadt,
   telt opnieuw mee; linkpreviews (zoals in WhatsApp) tellen niet mee omdat die
   geen video afspelen en het script niet uitvoeren.
-- Ook bevroren albums tellen mee: hun vastgelegde pagina's bevatten hetzelfde
-  script.
+- Albums die je **na** deze wijziging bevriest tellen mee: hun vastgelegde
+  pagina's bevatten hetzelfde script en hun videokopie is de nieuwe webversie.
+  Albums die **daarvóór** al bevroren waren houden hun oude pagina en oude
+  videokopie — bewust, want een bevroren editie wordt nooit vervangen. Zie
+  "Gedrukt fotoboek: album bevriezen".
 - Het bestand hoort bij je NAS-back-up als je de geschiedenis wilt houden; het
   wordt gebufferd weggeschreven (elke paar seconden en bij afsluiten).
 

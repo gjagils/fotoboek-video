@@ -9,7 +9,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'frozen-album-test-'));
 process.env.DATA_DIR = path.join(temporary, 'data');
 process.env.VIDEOS_DIR = path.join(temporary, 'videos');
 process.env.ADMIN_PASSWORD = 'test-only';
-const { app } = require('../server');
+const { app, views } = require('../server');
 const { freezeAlbum } = require('../freeze');
 const { loadArchive, withDataLock } = require('../archive');
 const data = process.env.DATA_DIR;
@@ -39,6 +39,8 @@ test('printed links keep the same edition after edits, removals and rescanning',
     assert.equal((await post('/admin/freeze', { folder, freeze: 'yes' }, false)).status, 401);
     assert.equal((await post('/admin/freeze', { folder })).status, 400);
     const beforePlayer = await (await fetch(base + `/v?id=${id}`)).text();
+    assert.match(beforePlayer, /preload="auto"/);
+    assert.match(beforePlayer, /stats\/view/);
     const frozen = await post('/admin/freeze', { folder, freeze: 'yes' });
     assert.equal(frozen.status, 200, await frozen.text());
     const album = loadArchive(data).albums[folder];
@@ -69,6 +71,14 @@ test('printed links keep the same edition after edits, removals and rescanning',
     // Even loss/replacement of the live index must not break a printed link.
     json(path.join(data, 'mapping.json'), {});
     assert.equal(await (await fetch(base + `/video/${id}`)).text(), '0123456789-frozen-video');
+    // De bevroren editie speelt en telt op eigen kracht, ook zonder live index.
+    const frozenVideo = await fetch(base + `/video/${id}.mp4?v=bevroren`);
+    assert.equal(await frozenVideo.text(), '0123456789-frozen-video');
+    assert.equal(frozenVideo.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal((await fetch(base + `/thumb/${id}.jpg?v=bevroren`)).status, 200);
+    const counted = await fetch(base + '/stats/view', { method: 'POST', body: new URLSearchParams({ id, event: 'play' }) });
+    assert.equal(counted.status, 204);
+    assert.equal(views.stats(id).plays, 1);
     assert.equal((await fetch(base + `/admin/qr/${id}`, { headers: { authorization: auth } })).status, 200);
     assert.equal((await fetch(base + '/admin/folder-qr?folder=' + encodeURIComponent(folder), { headers: { authorization: auth } })).status, 200);
     const repeated = await freezeAlbum(folder);
