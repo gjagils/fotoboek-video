@@ -10,6 +10,7 @@ data/thumbnails/
 data/streamable/
 
 data/frozen-albums/
+data/frozen-album-backups/
 data/update.lock
 data/views.json
 data/generate.log

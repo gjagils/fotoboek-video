@@ -42,8 +42,18 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
   dus een album dat ná deze wijziging bevroren wordt krijgt de nieuwe webversie,
   `preload="auto"` en de kijkcijfers. Een album dat er al vóór stond houdt zijn
   oude kopie: `generate.js` slaat bronnen in bevroren albums over en een archief
-  wordt nooit vervangen. Alleen opnieuw vastleggen (nieuwe editie of een expliciete
-  ververs-actie) verandert daar iets aan.
+  wordt nooit vervangen.
+- `refresh.js` — de uitzondering daarop, alleen op uitdrukkelijk verzoek via `/admin`
+  (of `node refresh.js "<map>"`). Verlicht de video's ín een bevroren album en legt de
+  pagina's opnieuw vast, met dezelfde ID's, zodat gedrukte QR-codes blijven werken.
+  De vorige editie gaat via een `rename` naar `data/frozen-album-backups/<sleutel>/`
+  en wordt bij een tweede verversing niet overschreven: daar staat dus altijd de
+  gedrukte editie. `node refresh.js --terug "<map>"` zet die terug, maar alleen nadat
+  elke sha256 uit het manifest gecontroleerd is. Beide stappen zijn hernoemingen van
+  mappen (klaarzetten in `.verversen-*`, dan omwisselen), dus er staat nooit een halve
+  editie live. `freeze.js` deelt hiervoor `capturePage`, `inlineGalleryAssets` en
+  `verifyArchive`; `req.captureLive` en `req.mediaDirectory` laten de renderers een
+  pagina opnieuw opbouwen voor een album dat al gearchiveerd is.
 - `server.js` — Express-app met de volgende routes:
   - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag (`preload="auto"`,
     `poster` naar `/thumb/<id>.jpg`), een laad-indicator bij haperen en een klein

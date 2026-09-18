@@ -8,7 +8,9 @@ const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, 'videos');
 const BASE_URL = (process.env.BASE_URL || 'https://albumvideo.gerdjan.nl').replace(/\/$/, '');
 
-function capturePage(render, query) {
+// Legt een pagina vast zoals de server hem nu zou renderen. `request` voegt de
+// velden toe die alleen bij vastleggen gelden (captureLive, mediaDirectory).
+function capturePage(render, query, request = {}) {
   let html;
   const response = {
     set() { return this; }, // Kopregels (zoals Cache-Control) horen niet in een vastgelegde pagina.
@@ -16,9 +18,31 @@ function capturePage(render, query) {
     type() { return this; },
     send(value) { html = value; },
   };
-  render({ query }, response);
+  render({ query, ...request }, response);
   if (!html) throw new Error('Pagina kon niet worden vastgelegd');
   return html;
+}
+
+// Een vastgelegde galerij moet los van de server te openen zijn, dus stijlen en
+// koptekeningen gaan mee in de pagina zelf.
+function inlineGalleryAssets(gallery) {
+  return gallery
+    .replace('<link rel="stylesheet" href="/thailand-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'thailand-films.css'), 'utf8')}</style>`)
+    .replace('src="/assets/thailand-header-decoration.svg"', () => `src="data:image/svg+xml;base64,${fs.readFileSync(path.join(__dirname, 'assets/thailand-header-decoration.svg')).toString('base64')}"`)
+    .replace('<link rel="stylesheet" href="/assets/safari-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'assets/safari-films.css'), 'utf8')}</style>`)
+    .replace('src="/assets/safari-header.jpg"', () => `src="data:image/jpeg;base64,${fs.readFileSync(path.join(__dirname, 'assets/safari-header.jpg')).toString('base64')}"`);
+}
+
+// Loopt elk bestand uit manifest.sha256 na. Zo blijkt een beschadigde of
+// onvolledige editie meteen, in plaats van pas bij een kijker.
+async function verifyArchive(directory) {
+  const manifest = JSON.parse(await fs.promises.readFile(path.join(directory, 'manifest.json'), 'utf8'));
+  for (const [file, expected] of Object.entries(manifest.sha256 || {})) {
+    const hash = crypto.createHash('sha256');
+    for await (const chunk of fs.createReadStream(path.join(directory, file))) hash.update(chunk);
+    if (hash.digest('hex') !== expected) throw new Error(`Bestand komt niet overeen met het archief: ${file}`);
+  }
+  return manifest;
 }
 
 async function copyStable(source, target) {
@@ -45,12 +69,7 @@ async function freezeAlbum(folder) {
     const staging = await fs.promises.mkdtemp(path.join(root, '.pending-'));
     const manifest = { version: 1, folder, frozenAt: new Date().toISOString(), baseUrl: BASE_URL, videos: {} };
     try {
-      let gallery = capturePage(renderGallery, { folder });
-      gallery = gallery.replace('<link rel="stylesheet" href="/thailand-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'thailand-films.css'), 'utf8')}</style>`)
-        .replace('src="/assets/thailand-header-decoration.svg"', () => `src="data:image/svg+xml;base64,${fs.readFileSync(path.join(__dirname, 'assets/thailand-header-decoration.svg')).toString('base64')}"`);
-      gallery = gallery.replace('<link rel="stylesheet" href="/assets/safari-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'assets/safari-films.css'), 'utf8')}</style>`)
-        .replace('src="/assets/safari-header.jpg"', () => `src="data:image/jpeg;base64,${fs.readFileSync(path.join(__dirname, 'assets/safari-header.jpg')).toString('base64')}"`);
-      await fs.promises.writeFile(path.join(staging, 'gallery.html'), gallery);
+      await fs.promises.writeFile(path.join(staging, 'gallery.html'), inlineGalleryAssets(capturePage(renderGallery, { folder })));
       for (const [id, relativePath] of entries) {
         if (!/^[a-f0-9]{10}$/.test(id)) throw new Error('Ongeldige video-ID');
         const source = path.resolve(VIDEOS_DIR, relativePath);
@@ -88,4 +107,4 @@ if (require.main === module) {
     process.exitCode = 1;
   });
 }
-module.exports = { freezeAlbum };
+module.exports = { freezeAlbum, capturePage, inlineGalleryAssets, verifyArchive };

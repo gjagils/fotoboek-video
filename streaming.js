@@ -7,8 +7,18 @@
 // webversie met een beheersbare bitrate; al webvriendelijke bronnen blijven
 // gewoon een snelle remux zonder kwaliteitsverlies.
 //
-// Deze module bevat alleen pure functies (geen ffmpeg-aanroepen), zodat de
-// keuzes zonder ffmpeg getest kunnen worden.
+// De keuzes hieronder zijn pure functies, zodat ze zonder ffmpeg getest kunnen
+// worden; onderaan staan de ffmpeg-aanroepen die generate.js en refresh.js delen.
+
+const fs = require("fs");
+const path = require("path");
+const { execFile } = require("child_process");
+const { promisify } = require("util");
+
+const execFileAsync = promisify(execFile);
+// ffmpeg kan veel naar stderr schrijven; een ruime buffer voorkomt dat een lange
+// video het kindproces laat afbreken.
+const FFMPEG_OPTIONS = { maxBuffer: 32 * 1024 * 1024 };
 
 const WEB_VIDEO_CODECS = new Set(["h264", "avc1"]);
 const WEB_AUDIO_CODECS = new Set(["aac", "mp3"]);
@@ -130,4 +140,45 @@ function transcodeArgs(inputPath, outputPath, limits = DEFAULT_LIMITS) {
   ];
 }
 
-module.exports = { DEFAULT_LIMITS, limitsFromEnv, parseProbe, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs };
+async function runFfmpeg(args) {
+  return execFileAsync("ffmpeg", args, FFMPEG_OPTIONS);
+}
+
+// Leest codec, resolutie en bitrate uit de stderr van een ultrakorte ffmpeg-run.
+// Zo is er geen losse ffprobe nodig naast de ffmpeg die er al is.
+async function probeFile(filePath) {
+  try {
+    const { stderr } = await runFfmpeg(["-hide_banner", "-nostats", "-i", filePath, "-t", "0.1", "-f", "null", "-"]);
+    return parseProbe(stderr, fs.statSync(filePath).size);
+  } catch (error) {
+    console.warn(`Kon eigenschappen van ${path.basename(filePath)} niet lezen: ${error.message}`);
+    return null;
+  }
+}
+
+// Staat de moov-atom vóór de mediadata? Dan kan de browser direct beginnen met
+// afspelen in plaats van eerst (bijna) het hele bestand te downloaden.
+function hasFastStart(filePath) {
+  let file;
+  try {
+    file = fs.openSync(filePath, "r");
+    const header = Buffer.alloc(16);
+    for (let offset = 0, atoms = 0; atoms < 32; atoms++) {
+      if (fs.readSync(file, header, 0, 16, offset) < 8) return false;
+      const name = header.toString("latin1", 4, 8);
+      if (name === "moov") return true;
+      if (name === "mdat") return false;
+      // Een grootte van 1 betekent dat de echte grootte in de volgende 8 bytes staat.
+      const size = header.readUInt32BE(0) === 1 ? Number(header.readBigUInt64BE(8)) : header.readUInt32BE(0);
+      if (!(size >= 8)) return false;
+      offset += size;
+    }
+    return false;
+  } catch {
+    return false;
+  } finally {
+    if (file !== undefined) fs.closeSync(file);
+  }
+}
+
+module.exports = { DEFAULT_LIMITS, limitsFromEnv, parseProbe, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile, hasFastStart };
