@@ -13,7 +13,7 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const QRCode = require("qrcode");
 const { loadArchive, withDataLock } = require("./archive");
-const { limitsFromEnv, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile } = require("./streaming");
+const { STREAM_VERSION, limitsFromEnv, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile } = require("./streaming");
 
 const execFileAsync = promisify(execFile);
 // ffmpeg kan veel naar stderr schrijven; een ruime buffer voorkomt dat een
@@ -32,8 +32,6 @@ const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 const THUMBNAIL_VERSION = 3;
-// Verhoog dit nummer om alle webversies opnieuw te laten beoordelen.
-const STREAM_VERSION = 2;
 const STREAM_LIMITS = limitsFromEnv();
 
 // Eerste bruikbare, niet-zwarte frame als thumbnail. Sommige video's beginnen met

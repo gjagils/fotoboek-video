@@ -10,7 +10,8 @@ process.env.VIDEOS_DIR = path.join(temporary, 'videos');
 process.env.ADMIN_PASSWORD = 'test-only';
 const { app } = require('../server');
 const { freezeAlbum } = require('../freeze');
-const { refreshAlbum, restoreAlbum, backupDirectory } = require('../refresh');
+const { refreshAlbum, restoreAlbum, backupDirectory, alreadyRefreshed } = require('../refresh');
+const { STREAM_VERSION } = require('../streaming');
 const { loadArchive } = require('../archive');
 const data = process.env.DATA_DIR;
 const sources = process.env.VIDEOS_DIR;
@@ -72,6 +73,23 @@ test('verversen houdt de gedrukte links heel, vernieuwt de pagina en bewaart de 
   // Een tweede verversing laat die eerste, gedrukte editie met rust.
   await refreshAlbum(folder);
   assert.equal(read(path.join(backupDirectory(folder), `${id}.html`)), printedPage);
+});
+
+test('een tweede verversing zet niets opnieuw om, maar vernieuwt alleen de pagina', () => {
+  // Een omgezette film meet zelf vaak nét boven de bitrategrens, dus op de
+  // bitrate afgaan zou elke verversing opnieuw coderen — kwaliteitsverlies en
+  // uren rekentijd voor niets.
+  const fresh = { relativePath: 'a.mp4', streamVersion: STREAM_VERSION, streamMode: 'transcode' };
+  assert.equal(alreadyRefreshed({ refreshedAt: '2026-09-18T00:00:00Z' }, fresh), true);
+  // Edities uit de eerste versie van deze verversing noteerden nog niets per video.
+  assert.equal(alreadyRefreshed({ refreshedAt: '2026-09-18T00:00:00Z' }, { relativePath: 'a.mp4' }), true);
+  // Een album dat nog nooit ververst is, wordt wél beoordeeld.
+  assert.equal(alreadyRefreshed({}, { relativePath: 'a.mp4' }), false);
+  // Andere grenzen (hoger versienummer) laten alles opnieuw beoordelen.
+  assert.equal(alreadyRefreshed({ refreshedAt: '2026-09-18T00:00:00Z' }, { ...fresh, streamVersion: STREAM_VERSION - 1 }), false);
+
+  const stored = JSON.parse(read(path.join(loadArchive(data).albums[folder].directory, 'manifest.json')));
+  assert.equal(stored.videos[id].streamVersion, STREAM_VERSION); // Verversen legt dit nu vast.
 });
 
 test('de bewaarde editie gaat terug zoals ze was, en een beschadigde back-up wordt geweigerd', async () => {
