@@ -18,12 +18,23 @@ const path = require('path');
 const crypto = require('crypto');
 const { archiveKey, loadArchive, withDataLock } = require('./archive');
 const { capturePage, inlineGalleryAssets, verifyArchive } = require('./freeze');
-const { limitsFromEnv, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile, hasFastStart } = require('./streaming');
+const { STREAM_VERSION, limitsFromEnv, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile, hasFastStart } = require('./streaming');
 
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
 const ARCHIVE_ROOT = path.join(DATA_DIR, 'frozen-albums');
 const BACKUP_ROOT = path.join(DATA_DIR, 'frozen-album-backups');
 const STREAM_LIMITS = limitsFromEnv();
+
+// Is deze video al door een verversing gegaan? Zo ja: nooit opnieuw omzetten.
+// Een omgezette film meet zelf vaak nét boven de grens (audio en containeropslag
+// tellen mee), dus op de bitrate afgaan zou hem elke keer opnieuw laten coderen,
+// met kwaliteitsverlies en uren rekentijd voor niets.
+function alreadyRefreshed(manifest, video) {
+  if (video.streamVersion === STREAM_VERSION) return true;
+  // Edities uit de eerste versie van deze verversing noteerden nog niets per
+  // video; het manifest zelf verraadt dat ze al verlicht zijn.
+  return Boolean(manifest.refreshedAt) && video.streamVersion === undefined;
+}
 
 function backupDirectory(folder) {
   return path.join(BACKUP_ROOT, archiveKey(folder));
@@ -65,10 +76,14 @@ async function refreshAlbum(folder) {
       for (const [id, video] of Object.entries(manifest.videos)) {
         const source = path.join(current, `${id}.mp4`);
         const target = path.join(staging, `${id}.mp4`);
-        const probe = await probeFile(source);
-        const plan = chooseStreamPlan(probe, STREAM_LIMITS);
+        const keepAsIs = alreadyRefreshed(manifest, video);
+        const probe = keepAsIs ? null : await probeFile(source);
+        const plan = keepAsIs ? { mode: 'copy', reasons: [] } : chooseStreamPlan(probe, STREAM_LIMITS);
 
-        if (!probe) {
+        if (keepAsIs) {
+          await fs.promises.copyFile(source, target);
+          console.log(`${video.relativePath}: al eerder verlicht, alleen de pagina wordt vernieuwd`);
+        } else if (!probe) {
           // Niet te lezen door ffmpeg: nooit aan zitten, anders raak je de
           // gedrukte editie kwijt aan een mislukte omzetting.
           await fs.promises.copyFile(source, target);
@@ -87,7 +102,7 @@ async function refreshAlbum(folder) {
         const before = video.size;
         const after = (await fs.promises.stat(target)).size;
         if (!after) throw new Error(`Lege videokopie voor ${video.relativePath}`);
-        manifest.videos[id] = { ...video, size: after };
+        manifest.videos[id] = { ...video, size: after, streamVersion: STREAM_VERSION, streamMode: keepAsIs ? video.streamMode || 'transcode' : plan.mode };
         console.log(`  ${Math.round(before / 1024 / 1024)} MB -> ${Math.round(after / 1024 / 1024)} MB`);
       }
 
@@ -146,4 +161,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { refreshAlbum, restoreAlbum, hasBackup, backupDirectory };
+module.exports = { refreshAlbum, restoreAlbum, hasBackup, backupDirectory, alreadyRefreshed };

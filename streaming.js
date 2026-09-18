@@ -20,6 +20,9 @@ const execFileAsync = promisify(execFile);
 // video het kindproces laat afbreken.
 const FFMPEG_OPTIONS = { maxBuffer: 32 * 1024 * 1024 };
 
+// Verhoog dit nummer om alle webversies opnieuw te laten beoordelen.
+const STREAM_VERSION = 2;
+
 const WEB_VIDEO_CODECS = new Set(["h264", "avc1"]);
 const WEB_AUDIO_CODECS = new Set(["aac", "mp3"]);
 
@@ -181,4 +184,4 @@ function hasFastStart(filePath) {
   }
 }
 
-module.exports = { DEFAULT_LIMITS, limitsFromEnv, parseProbe, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile, hasFastStart };
+module.exports = { STREAM_VERSION, DEFAULT_LIMITS, limitsFromEnv, parseProbe, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs, runFfmpeg, probeFile, hasFastStart };

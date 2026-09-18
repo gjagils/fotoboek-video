@@ -34,7 +34,8 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
   een bitrate die hoger ligt dan de verbinding aankan blijft haperen. De gekozen
   aanpak staat per video in `data/source-state.json` (`streamMode`, `streamVersion`),
   zodat een rescan niets dubbel doet. Grenzen zijn via omgevingsvariabelen bij te
-  stellen (zie README); `STREAM_VERSION` verhogen laat alles opnieuw beoordelen.
+  stellen (zie README); `STREAM_VERSION` in `streaming.js` verhogen laat alles
+  opnieuw beoordelen.
 - `views.js` — kijkcijfers per video in `data/views.json`, gebufferd weggeschreven.
   Alleen tellingen (geopend/gestart/uitgekeken, ook per dag); bewust geen IP-adressen
   of cookies.
@@ -49,7 +50,11 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
   De vorige editie gaat via een `rename` naar `data/frozen-album-backups/<sleutel>/`
   en wordt bij een tweede verversing niet overschreven: daar staat dus altijd de
   gedrukte editie. `node refresh.js --terug "<map>"` zet die terug, maar alleen nadat
-  elke sha256 uit het manifest gecontroleerd is. Beide stappen zijn hernoemingen van
+  elke sha256 uit het manifest gecontroleerd is. Het manifest noteert per video
+  `streamVersion`/`streamMode`, zodat een tweede verversing alleen de pagina's
+  vernieuwt: een omgezette film meet zelf vaak nét boven de bitrategrens (audio en
+  containeropslag tellen mee), dus op de bitrate afgaan zou elke keer opnieuw
+  coderen, met kwaliteitsverlies. Beide stappen zijn hernoemingen van
   mappen (klaarzetten in `.verversen-*`, dan omwisselen), dus er staat nooit een halve
   editie live. `freeze.js` deelt hiervoor `capturePage`, `inlineGalleryAssets` en
   `verifyArchive`; `req.captureLive` en `req.mediaDirectory` laten de renderers een

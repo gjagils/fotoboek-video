@@ -180,7 +180,7 @@ bevallen:
 | `STREAM_AUDIO_BITRATE_KBPS` | `128` | Geluidsbitrate in kb/s |
 | `STREAM_TRANSCODE` | aan | Op `off` zetten schakelt omzetten uit (alleen remux) |
 
-Verhoog `STREAM_VERSION` in `generate.js` om alle webversies opnieuw te laten
+Verhoog `STREAM_VERSION` in `streaming.js` om alle webversies opnieuw te laten
 beoordelen na het wijzigen van deze grenzen.
 
 Let op bij HDR-opnames (iPhone "Dolby Vision", 10-bits): die worden omgezet naar
@@ -242,6 +242,9 @@ nieuwe QR-codes) geen optie. Daarvoor is **Bevroren editie verversen** op
   krijgt de laad-indicator en telt mee in de kijkcijfers.
 - De editie die er stond verhuist naar `data/frozen-album-backups/<sleutel>/`.
   Bij een tweede verversing blijft die eerste, gedrukte editie staan.
+- Een tweede verversing zet de video's niet opnieuw om — dat zou alleen kwaliteit
+  kosten — maar legt wel de pagina's opnieuw vast. Handig na een wijziging aan de
+  afspeelpagina: die pagina's staan bij een bevroren album immers vast op schijf.
 - Terug kan altijd met **Bewaarde editie terugzetten** (of
   `node refresh.js --terug "<mapnaam>"`). Voordat er iets wordt teruggezet,
   controleert het script elke sha256 uit het manifest; bij twijfel gebeurt er
