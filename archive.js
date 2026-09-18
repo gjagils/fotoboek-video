@@ -26,15 +26,37 @@ function loadArchive(dataDir) {
   return { albums, mapping, videos };
 }
 
+// A scan that transcodes runs for a long time, so a restart in the middle used to
+// leave a lock nobody owns. Only a lock whose process is really gone is taken over.
+function lockIsStale(lockPath) {
+  let contents;
+  try {
+    contents = fs.readFileSync(lockPath, 'utf8');
+  } catch {
+    return false; // Just vanished: the next attempt decides.
+  }
+  if (!contents.trim()) return Date.now() - fs.statSync(lockPath).mtimeMs > 60_000; // Written moments after creation.
+  try {
+    process.kill(JSON.parse(contents).pid, 0);
+    return false;
+  } catch (error) {
+    return error.code !== 'EPERM'; // EPERM: the process exists but is someone else's.
+  }
+}
+
 async function withDataLock(dataDir, action) {
   fs.mkdirSync(dataDir, { recursive: true });
   const lockPath = path.join(dataDir, 'update.lock');
   let lock;
-  try {
-    lock = fs.openSync(lockPath, 'wx');
-  } catch (error) {
-    if (error.code === 'EEXIST') throw new Error('Er draait al een scan of archivering. Probeer het later opnieuw.');
-    throw error;
+  for (const isRetry of [false, true]) {
+    try {
+      lock = fs.openSync(lockPath, 'wx');
+      break;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      if (isRetry || !lockIsStale(lockPath)) throw new Error('Er draait al een scan of archivering. Probeer het later opnieuw.');
+      fs.rmSync(lockPath, { force: true });
+    }
   }
   try {
     fs.writeFileSync(lock, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
@@ -45,4 +67,4 @@ async function withDataLock(dataDir, action) {
   }
 }
 
-module.exports = { archiveKey, loadArchive, withDataLock };
+module.exports = { archiveKey, loadArchive, withDataLock, lockIsStale };

@@ -11,9 +11,10 @@ smartphone af in de browser — zonder app te hoeven installeren.
   Bestaande ID's blijven hetzelfde. Gewijzigde video's krijgen automatisch nieuwe
   afgeleide bestanden; verwijderde video's worden uit de mapping en galerij verwijderd.
 - `server.js` — de webserver. `/v?id=<id>` toont een simpele afspeelpagina,
-  `/video/<id>` levert het videobestand (met Range-support, nodig om te kunnen spoelen
-  op mobiel). Bekende ID's zijn nodig om een video te bekijken; alleen `/gallery` is
-  een publiek overzicht (zie hieronder).
+  `/video/<id>.mp4` levert het videobestand (met Range-support, nodig om te kunnen
+  spoelen op mobiel), `/stats/view` telt hoe vaak een film bekeken wordt. Bekende
+  ID's zijn nodig om een video te bekijken; alleen `/gallery` is een publiek
+  overzicht (zie hieronder).
 
 ## Installatie op de Synology
 
@@ -34,7 +35,9 @@ smartphone af in de browser — zonder app te hoeven installeren.
 1. Zet het mp4-bestand in `/volume1/homes/gjagils/fotoboek-video/videos/`
    (eventueel in een submap).
 2. Open `https://albumvideo.gerdjan.nl/admin`, log in als `admin` en klik op
-   **Video's scannen en QR-codes genereren**. Daarna kun je per video de link
+   **Video's scannen en QR-codes genereren**. De scan draait in de achtergrond;
+   de voortgang staat onder **Scan en webversies** en zware video's worden daar
+   omgezet naar een vlot afspeelbare webversie. Daarna kun je per video de link
    openen, met **Kopieer link** rechtstreeks voor WhatsApp kopiëren of met
    **Download QR** de bijbehorende PNG downloaden.
    Onder **Vakantie-albums** staat daarnaast voor elke submap een eigen galerijlink
@@ -136,13 +139,90 @@ afzonderlijk op **Standaard** of **Thailand-reisdagboek** worden gezet.
 - een **thumbnail** (`data/thumbnails/<id>.jpg`) van het eerste frame — gebruikt
   als `poster` op de afspeelpagina en op `/gallery`, zodat er meteen een beeld
   staat terwijl de video nog laadt.
-- een **streamable kopie** (`data/streamable/<id>.mp4`) met de moov-atom vooraan
+- een **webversie** (`data/streamable/<id>.mp4`) met de moov-atom vooraan
   ("faststart"). Veel telefoonopnames hebben die metadata juist aan het eínd van
   het bestand staan, waardoor de browser eerst (bijna) het hele bestand moet
-  downloaden voordat 'ie kan beginnen met afspelen. De streamable kopie lost dat
-  op zonder opnieuw te coderen (dus snel, geen kwaliteitsverlies) en wordt
-  automatisch gebruikt door `/video/<id>` als 'ie bestaat. Het origineel in
-  `videos/` blijft ongewijzigd.
+  downloaden voordat 'ie kan beginnen met afspelen. De webversie lost dat op en
+  wordt automatisch gebruikt door `/video/<id>` als 'ie bestaat. Het origineel in
+  `videos/` blijft altijd ongewijzigd.
+
+### Waarom een video hapert — en wat er nu gebeurt
+
+Haperen komt bijna nooit doordat de browser "te weinig buffert": de browser
+buffert zo snel als de verbinding toelaat. Het komt doordat de video méér data
+per seconde vraagt dan de verbinding levert. Een telefoonopname van 4K/45 Mbit/s
+blijft na een remux gewoon 45 Mbit/s, en dat haalt een mobiele verbinding via de
+NAS-upload en de tunnel niet.
+
+Daarom kijkt `generate.js` nu eerst naar de bron:
+
+- Is de bron al webvriendelijk (H.264, korte zijde ≤ 1080 px, ≤ 4500 kb/s), dan
+  wordt hij alleen geremuxt — snel en zonder kwaliteitsverlies, precies als eerst.
+- Is de bron te zwaar (4K, hoge bitrate) of ongeschikt (HEVC speelt niet overal),
+  dan wordt hij **één keer** omgezet naar H.264/AAC met de korte zijde op maximaal
+  1080 px en de bitrate afgetopt op 4500 kb/s, met een keyframe elke 2 seconden
+  zodat spoelen snel blijft reageren. Bij een staande video blijft de breedte dus
+  1080 px — staande filmpjes worden niet kleiner gemaakt dan nodig.
+
+Dat omzetten kost rekentijd op de NAS (ordegrootte: een minuut per minuut video),
+dus de scan draait in de achtergrond. Op `/admin` staat onder **Scan en
+webversies** de live voortgang; je kunt de pagina gerust sluiten.
+
+Bij te stellen via de omgeving (Portainer-stack), als de standaardwaarden niet
+bevallen:
+
+| Variabele | Standaard | Betekenis |
+| --- | --- | --- |
+| `STREAM_MAX_HEIGHT` | `1080` | Maximale korte zijde van de webversie |
+| `STREAM_MAX_BITRATE_KBPS` | `4500` | Maximale bitrate in kb/s |
+| `STREAM_CRF` | `23` | Kwaliteit (lager = mooier en groter) |
+| `STREAM_PRESET` | `veryfast` | Snelheid/compressie-afweging van x264 |
+| `STREAM_AUDIO_BITRATE_KBPS` | `128` | Geluidsbitrate in kb/s |
+| `STREAM_TRANSCODE` | aan | Op `off` zetten schakelt omzetten uit (alleen remux) |
+
+Verhoog `STREAM_VERSION` in `generate.js` om alle webversies opnieuw te laten
+beoordelen na het wijzigen van deze grenzen.
+
+Let op bij HDR-opnames (iPhone "Dolby Vision", 10-bits): die worden omgezet naar
+gewone SDR-kleuren en kunnen daardoor iets vlakker ogen dan het origineel. Valt
+dat tegen bij een bepaalde film, zet `STREAM_TRANSCODE=off`, scan opnieuw en
+lever die film als remux uit — dan blijft de kwaliteit, maar keert het haperen
+terug bij een trage verbinding.
+
+### Caching
+
+De afspeelpagina verwijst naar `/video/<id>.mp4?v=<versie>` en
+`/thumb/<id>.jpg?v=<versie>`. De versiesleutel komt uit de grootte en
+wijzigingstijd van het bestand, dus:
+
+- mét sleutel mogen browser en Cloudflare het bestand een jaar bewaren
+  (`immutable`) — een tweede kijker of een herhaalde scan van dezelfde QR-code
+  hoeft niet opnieuw door de tunnel;
+- wordt de bronvideo vervangen, dan verandert de sleutel en dus de URL, zodat
+  niemand een oude kopie uit de cache krijgt;
+- `/video/<id>` zonder sleutel blijft werken en blijft hervalideren (oude
+  bevroren pagina's en gedeelde links gebruiken dat pad nog).
+
+De extensie in het pad staat er bewust: Cloudflare cachet `.mp4` en `.jpg`
+standaard wel, een extensieloos pad niet.
+
+## Kijkcijfers
+
+De afspeelpagina meldt drie dingen aan de server: **geopend** (pagina geladen),
+**gestart** (de film begint te lopen) en **uitgekeken** (tot het einde). Per
+paginabezoek telt elke gebeurtenis hoogstens één keer.
+
+- Zichtbaar op `/admin` onder **Kijkcijfers**: per film het totaal, de laatste
+  30 dagen en wanneer de film voor het laatst bekeken is. Per album staat het
+  aantal starts in de albumkop.
+- Opgeslagen in `data/views.json` — alleen tellingen per video en per dag. Geen
+  cookies, geen IP-adressen, geen bezoekersprofielen. Wie de pagina herlaadt,
+  telt opnieuw mee; linkpreviews (zoals in WhatsApp) tellen niet mee omdat die
+  geen video afspelen en het script niet uitvoeren.
+- Ook bevroren albums tellen mee: hun vastgelegde pagina's bevatten hetzelfde
+  script.
+- Het bestand hoort bij je NAS-back-up als je de geschiedenis wilt houden; het
+  wordt gebufferd weggeschreven (elke paar seconden en bij afsluiten).
 
 ## Beveiliging
 

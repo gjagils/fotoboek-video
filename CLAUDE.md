@@ -19,19 +19,41 @@ je telefoon → filmpje speelt direct af in de browser (Safari/Chrome).
   in `data/qrcodes/<videonaam>--<id>.png` die verwijst naar
   `BASE_URL/v?id=<id>`. Bestaande ID-only QR-bestanden worden bij een scan
   automatisch naar dit herkenbare formaat hernoemd. Genereert daarnaast via ffmpeg
-  per video een thumbnail (`data/thumbnails/<id>.jpg`, eerste frame op 0.5s) en een
-  "streamable" kopie (`data/streamable/<id>.mp4`, remux met `-movflags +faststart`,
-  geen her-encode) zodat de browser direct kan starten met afspelen. Beide worden
-  alleen aangemaakt als ze nog niet bestaan; het origineel in `videos/` blijft
+  per video een thumbnail (`data/thumbnails/<id>.jpg`, eerste niet-zwarte frame) en
+  een webversie (`data/streamable/<id>.mp4`, altijd `-movflags +faststart`) zodat de
+  browser direct kan starten met afspelen. Beide worden alleen aangemaakt als ze nog
+  niet bestaan of als de bron wijzigde; het origineel in `videos/` blijft
   ongewijzigd. Vereist `ffmpeg` in de container (zie Dockerfile).
+- `streaming.js` — pure functies die bepalen hóé die webversie gemaakt wordt.
+  `generate.js` leest eerst codec, resolutie en bitrate van de bron uit de stderr van
+  een korte ffmpeg-run (geen losse ffprobe nodig). Webvriendelijke bronnen (H.264,
+  korte zijde ≤ `STREAM_MAX_HEIGHT`, ≤ `STREAM_MAX_BITRATE_KBPS`) worden alleen
+  geremuxt; te zware of ongeschikte bronnen (4K, hoge bitrate, HEVC) worden één keer
+  her-encodeerd naar H.264/AAC met afgetopte bitrate en keyframes elke 2 seconden.
+  Dat is de kern van de oplossing tegen haperen: remuxen verlaagt de bitrate niet, en
+  een bitrate die hoger ligt dan de verbinding aankan blijft haperen. De gekozen
+  aanpak staat per video in `data/source-state.json` (`streamMode`, `streamVersion`),
+  zodat een rescan niets dubbel doet. Grenzen zijn via omgevingsvariabelen bij te
+  stellen (zie README); `STREAM_VERSION` verhogen laat alles opnieuw beoordelen.
+- `views.js` — kijkcijfers per video in `data/views.json`, gebufferd weggeschreven.
+  Alleen tellingen (geopend/gestart/uitgekeken, ook per dag); bewust geen IP-adressen
+  of cookies.
 - `server.js` — Express-app met de volgende routes:
-  - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag, `poster` naar
-    `/thumb/<id>`.
-  - `GET /video/<id>` — levert het videobestand via `res.sendFile`, wat Range-requests
-    ondersteunt (nodig om te kunnen spoelen/scrubben op mobiel). Gebruikt de
-    streamable kopie uit `data/streamable/` als die bestaat, anders het origineel.
-    Onbekende ID's geven 404.
-  - `GET /thumb/<id>` — levert de thumbnail-JPEG van een video.
+  - `GET /v?id=<id>` — HTML-afspeelpagina met een `<video>`-tag (`preload="auto"`,
+    `poster` naar `/thumb/<id>.jpg`), een laad-indicator bij haperen en een klein
+    script dat kijkcijfers meldt via `navigator.sendBeacon`.
+  - `GET /video/<id>.mp4` — levert het videobestand via `res.sendFile`, wat
+    Range-requests ondersteunt (nodig om te kunnen spoelen/scrubben op mobiel).
+    Gebruikt de webversie uit `data/streamable/` als die bestaat, anders het origineel.
+    Onbekende ID's geven 404. `/video/<id>` zonder extensie blijft werken (oude
+    bevroren pagina's gebruiken dat pad).
+  - `GET /thumb/<id>.jpg` — levert de thumbnail-JPEG van een video.
+  - Media-URL's krijgen een versiesleutel (`?v=…`) uit grootte + mtime van het
+    bestand. Mét sleutel mag alles onderweg het een jaar cachen (`immutable`), zonder
+    sleutel blijft de oude "altijd hervalideren"-regel gelden. De extensie in het pad
+    is er omdat Cloudflare `.mp4`/`.jpg` standaard wél cachet en extensieloze paden niet.
+  - `POST /stats/view` — telt `open`, `play` of `complete` voor een bestaand ID.
+    Onbekende of verzonnen ID's worden geweigerd.
   - `GET /gallery` — **publieke** pagina met alle video's gegroepeerd per (sub)map,
     met thumbnails. Bewuste uitzondering op het "geen overzicht"-principe hieronder,
     zodat video's ook zonder fotoboek aan mensen getoond kunnen worden.
@@ -59,6 +81,8 @@ GitHub-secrets staan per repository ingesteld. Het publieke adres is
 `https://albumvideo.gerdjan.nl`; de Cloudflare Tunnel verwijst naar NAS-poort 3000.
 De beveiligde beheerpagina op `/admin` kan `generate.js` starten. Authenticatie
 gebruikt gebruiker `admin` en `ADMIN_PASSWORD` uit de Portainer stackomgeving.
+De scan draait in de achtergrond en schrijft naar `data/generate.log`; `/admin`
+toont die voortgang (`GET /admin/scan-status`) en de kijkcijfers per film.
 
 ## Losse commando's
 

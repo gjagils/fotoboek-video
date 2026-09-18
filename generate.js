@@ -13,8 +13,12 @@ const { execFile } = require("child_process");
 const { promisify } = require("util");
 const QRCode = require("qrcode");
 const { loadArchive, withDataLock } = require("./archive");
+const { limitsFromEnv, parseProbe, chooseStreamPlan, describePlan, remuxArgs, transcodeArgs } = require("./streaming");
 
 const execFileAsync = promisify(execFile);
+// ffmpeg kan veel naar stderr schrijven; een ruime buffer voorkomt dat een
+// lange video het kindproces laat afbreken.
+const FFMPEG_OPTIONS = { maxBuffer: 32 * 1024 * 1024 };
 
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
@@ -28,6 +32,9 @@ const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
 const BASE_URL = process.env.BASE_URL || "https://gerdjan.nl";
 const VIDEO_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
 const THUMBNAIL_VERSION = 3;
+// Verhoog dit nummer om alle webversies opnieuw te laten beoordelen.
+const STREAM_VERSION = 2;
+const STREAM_LIMITS = limitsFromEnv();
 
 // Eerste bruikbare, niet-zwarte frame als thumbnail. Sommige video's beginnen met
 // een zwarte fade die langer dan 0,5 seconde duurt. Meet daarom eerst het zwarte
@@ -37,39 +44,59 @@ async function generateThumbnail(inputPath, outputPath) {
 
   const { stderr } = await execFileAsync("ffmpeg", [
     "-hide_banner",
+    "-nostats",
     "-i", inputPath,
     "-t", "15",
     "-vf", "blackdetect=d=0.1:pix_th=0.10",
     "-an",
     "-f", "null",
     "-",
-  ]);
+  ], FFMPEG_OPTIONS);
   const initialBlack = stderr.match(/black_start:0(?:\.0+)?\s+black_end:([0-9.]+)/);
   if (initialBlack) thumbnailTime = Number(initialBlack[1]) + 0.1;
 
   await execFileAsync("ffmpeg", [
     "-y",
+    "-nostats",
     "-ss", String(thumbnailTime),
     "-i", inputPath,
     "-frames:v", "1",
     "-vf", "scale=480:-2",
     "-q:v", "4",
     outputPath,
-  ]);
+  ], FFMPEG_OPTIONS);
 }
 
-// Kopieert de video met de moov-atom vooraan ("faststart"), zodat de browser
-// direct kan beginnen met afspelen zonder eerst het hele bestand te downloaden.
-// Puur remuxen (geen her-encode), dus snel en zonder kwaliteitsverlies. Het
-// origineel in videos/ blijft ongewijzigd; dit is een aparte kopie in data/.
-async function generateStreamableCopy(inputPath, outputPath) {
-  await execFileAsync("ffmpeg", [
-    "-y",
-    "-i", inputPath,
-    "-c", "copy",
-    "-movflags", "+faststart",
-    outputPath,
-  ]);
+// Leest codec, resolutie en bitrate van de bron uit de stderr van een
+// ultrakorte ffmpeg-run. Zo is er geen losse ffprobe nodig.
+async function probeSource(inputPath) {
+  try {
+    const { stderr } = await execFileAsync("ffmpeg", [
+      "-hide_banner",
+      "-nostats",
+      "-i", inputPath,
+      "-t", "0.1",
+      "-f", "null",
+      "-",
+    ], FFMPEG_OPTIONS);
+    return parseProbe(stderr, fs.statSync(inputPath).size);
+  } catch (error) {
+    console.warn(`Kon eigenschappen van ${path.basename(inputPath)} niet lezen: ${error.message}`);
+    return null;
+  }
+}
+
+// Maakt de kopie waarmee de browser streamt: altijd met de moov-atom vooraan
+// ("faststart"), zodat afspelen direct kan beginnen. Webvriendelijke bronnen
+// worden alleen geremuxt (snel, geen kwaliteitsverlies); te zware bronnen
+// (4K, hoge bitrate, HEVC) worden één keer omgezet naar een versie die ook op
+// mobiel internet zonder haperen doorloopt. Het origineel in videos/ blijft
+// altijd ongewijzigd; dit is een aparte kopie in data/streamable/.
+async function generateStreamableCopy(inputPath, outputPath, plan) {
+  const args = plan.mode === "transcode"
+    ? transcodeArgs(inputPath, outputPath, STREAM_LIMITS)
+    : remuxArgs(inputPath, outputPath);
+  await execFileAsync("ffmpeg", args, FFMPEG_OPTIONS);
 }
 
 async function generateAtomically(generator, inputPath, outputPath) {
@@ -269,17 +296,32 @@ async function main() {
       }
     }
 
-    if (sourceChanged || !fs.existsSync(streamPath)) {
+    // Kopieën van vóór deze webversie-stap zijn altijd remuxes geweest.
+    const previousStream = fs.existsSync(streamPath) ? (sourceState[id]?.streamMode || "copy") : null;
+    const streamUpToDate = previousStream === "transcode" && !sourceChanged && sourceState[id]?.streamVersion === STREAM_VERSION;
+    const plan = streamUpToDate
+      ? { mode: "transcode", reasons: sourceState[id]?.streamReasons || [] }
+      : chooseStreamPlan(await probeSource(sourcePath), STREAM_LIMITS);
+
+    if (sourceChanged || !previousStream || previousStream !== plan.mode) {
       try {
-        await generateAtomically(generateStreamableCopy, sourcePath, streamPath);
-        console.log(`Streamable kopie ${sourceChanged ? "ververst" : "gemaakt"}: ${id}.mp4`);
+        await generateAtomically((input, output) => generateStreamableCopy(input, output, plan), sourcePath, streamPath);
+        console.log(`Webversie ${previousStream ? "ververst" : "gemaakt"}: ${id}.mp4 — ${describePlan(plan, STREAM_LIMITS)}`);
       } catch (err) {
         generationSucceeded = false;
-        console.warn(`Kon geen streamable kopie maken voor ${relativePath}: ${err.message}`);
+        console.warn(`Kon geen webversie maken voor ${relativePath}: ${err.message}`);
       }
     }
 
-    if (generationSucceeded) sourceState[id] = { ...signature, thumbnailVersion: THUMBNAIL_VERSION };
+    if (generationSucceeded) {
+      sourceState[id] = {
+        ...signature,
+        thumbnailVersion: THUMBNAIL_VERSION,
+        streamVersion: STREAM_VERSION,
+        streamMode: plan.mode,
+        streamReasons: plan.reasons,
+      };
+    }
   }
 
   // Maak één deelbare galerij-QR per echte submap. De queryparameter behoudt
@@ -328,7 +370,11 @@ async function main() {
   console.log(`Map-QR-codes: ${FOLDER_QR_DIR}`);
 }
 
-withDataLock(DATA_DIR, main).catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  withDataLock(DATA_DIR, main).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = { main, probeSource };

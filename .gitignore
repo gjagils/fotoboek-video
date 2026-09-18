@@ -11,3 +11,5 @@ data/streamable/
 
 data/frozen-albums/
 data/update.lock
+data/views.json
+data/generate.log
