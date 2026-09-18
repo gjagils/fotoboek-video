@@ -34,6 +34,7 @@ const STREAM_LIMITS = limitsFromEnv();
 const app = express();
 app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 let generationInProgress = false;
+let currentJobLabel = ""; // "Scan", "Verversen" of "Terugzetten", voor de status op /admin.
 
 // Kijkcijfers per video. Schrijft gebufferd naar data/views.json.
 const views = createViewCounter(DATA_DIR);
@@ -622,7 +623,7 @@ function adminPage(result = "") {
     <div class="studio-body">
       <h2>Scan en webversies</h2>
       <p>Bij het scannen krijgt elke nieuwe video een ID, een QR-code, een startbeeld en een webversie die vlot afspeelt. Zware bronnen (4K, hoge bitrate of HEVC) worden daarbij één keer omgezet naar maximaal ${STREAM_LIMITS.maxShortSide}p en ${STREAM_LIMITS.maxBitrateKbps} kb/s. Dat kost rekentijd op de NAS, dus de scan loopt in de achtergrond door — ook als je deze pagina sluit.</p>
-      <p id="scan-state" role="status" aria-live="polite">${generationInProgress ? "Bezig met scannen…" : "Geen scan bezig."}</p>
+      <p id="scan-state" role="status" aria-live="polite">${generationInProgress ? `${escapeHtml(currentJobLabel)} bezig…` : "Niets bezig."}</p>
       <pre id="scan-log" data-running="${generationInProgress}">${escapeHtml(scanLogTail() || "Nog geen scan uitgevoerd.")}</pre>
     </div>
   </details>
@@ -1103,7 +1104,7 @@ function adminPage(result = "") {
         if (!response.ok) return;
         const status = await response.json();
         scanLog.textContent = status.log || "Nog geen scan uitgevoerd.";
-        scanState.textContent = status.running ? "Bezig met scannen…" : "Geen scan bezig.";
+        scanState.textContent = status.running ? status.label + " bezig…" : "Niets bezig.";
         if (status.running) {
           scanLog.scrollTop = scanLog.scrollHeight;
           setTimeout(pollScan, 4000);
@@ -1251,6 +1252,7 @@ function startBackgroundWorker(res, { script, args = [], label, startedMessage }
   }
 
   generationInProgress = true;
+  currentJobLabel = label;
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const logFile = fs.openSync(SCAN_LOG_FILE, "w");
   let finished = false;
@@ -1258,6 +1260,7 @@ function startBackgroundWorker(res, { script, args = [], label, startedMessage }
     if (finished) return;
     finished = true;
     generationInProgress = false;
+    currentJobLabel = "";
     fs.closeSync(logFile);
     fs.appendFileSync(SCAN_LOG_FILE, `\n${message}\n`);
   };
@@ -1311,7 +1314,7 @@ app.post("/admin/restore-frozen", requireAdmin, (req, res) => {
 });
 
 app.get("/admin/scan-status", requireAdmin, (req, res) => {
-  res.status(200).json({ running: generationInProgress, log: scanLogTail() });
+  res.status(200).json({ running: generationInProgress, label: currentJobLabel, log: scanLogTail() });
 });
 
 function loadMapping() {
@@ -1381,9 +1384,25 @@ function renderPlayer(req, res) {
       if (!video) return;
 
       // Laat zien dat de film staat te laden in plaats van stil te haperen.
-      function busy(state) { spinner.dataset.visible = state ? "true" : "false"; }
-      ["waiting", "stalled", "seeking"].forEach(function (name) { video.addEventListener(name, function () { busy(true); }); });
-      ["playing", "canplay", "seeked", "error", "pause"].forEach(function (name) { video.addEventListener(name, function () { busy(false); }); });
+      // Bewust op de toestand van de speler en niet op losse gebeurtenissen:
+      // Safari meldt "stalled" ook als het downloaden even pauzeert omdat de
+      // buffer vol is. Op zo'n melding afgaan laat het rondje eindeloos draaien
+      // terwijl de film gewoon speelt.
+      var pending = null;
+      function update() {
+        var loading = !video.paused && !video.ended && video.readyState < video.HAVE_FUTURE_DATA;
+        if (!loading) {
+          if (pending !== null) { clearTimeout(pending); pending = null; }
+          spinner.dataset.visible = "false";
+          return;
+        }
+        // Korte hik van een halve seconde: niets laten zien, dat flikkert alleen maar.
+        if (pending === null) pending = setTimeout(function () { spinner.dataset.visible = "true"; }, 500);
+      }
+      ["waiting", "stalled", "playing", "canplay", "canplaythrough", "timeupdate", "progress",
+        "play", "pause", "seeking", "seeked", "ended", "loadeddata", "emptied", "error"]
+        .forEach(function (name) { video.addEventListener(name, update); });
+      update();
 
       // Kijkcijfers: hoogstens één telling per gebeurtenis per paginabezoek,
       // zonder cookies en zonder dat de bezoeker herkenbaar is.
