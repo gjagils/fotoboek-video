@@ -8,10 +8,12 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const express = require("express");
 const QRCode = require("qrcode");
 const { loadArchive, withDataLock } = require("./archive");
+const { createViewCounter, recentTotals, emptyStats } = require("./views");
+const { limitsFromEnv } = require("./streaming");
 
 const VIDEOS_DIR = process.env.VIDEOS_DIR || path.join(__dirname, "videos");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
@@ -21,13 +23,75 @@ const THUMB_DIR = path.join(DATA_DIR, "thumbnails");
 const STREAM_DIR = path.join(DATA_DIR, "streamable");
 const MAPPING_FILE = path.join(DATA_DIR, "mapping.json");
 const GALLERY_SETTINGS_FILE = path.join(DATA_DIR, "gallery-settings.json");
+const SCAN_LOG_FILE = path.join(DATA_DIR, "generate.log");
 const PORT = process.env.PORT || 3000;
 const BASE_URL = (process.env.BASE_URL || "https://albumvideo.gerdjan.nl").replace(/\/$/, "");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+// Dezelfde grenzen als generate.js gebruikt, alleen om ze op /admin te tonen.
+const STREAM_LIMITS = limitsFromEnv();
 
 const app = express();
 app.use(express.urlencoded({ extended: false, limit: "20kb" }));
 let generationInProgress = false;
+
+// Kijkcijfers per video. Schrijft gebufferd naar data/views.json.
+const views = createViewCounter(DATA_DIR);
+process.on("exit", () => views.flush());
+
+// Laatste regels van de scan-log, voor de voortgang op de beheerpagina.
+function scanLogTail(lines = 80) {
+  try {
+    return fs.readFileSync(SCAN_LOG_FILE, "utf8").split("\n").slice(-lines).join("\n").trim();
+  } catch {
+    return "";
+  }
+}
+
+// Korte versiesleutel uit grootte en wijzigingstijd van het bestand. Een URL
+// met deze sleutel mag een jaar gecachet worden (browser én Cloudflare), terwijl
+// een vervangen bronvideo meteen een andere URL oplevert.
+function fileVersion(filePath) {
+  try {
+    const stats = fs.statSync(filePath);
+    return crypto.createHash("sha1").update(`${stats.size}-${Math.round(stats.mtimeMs)}`).digest("hex").slice(0, 10);
+  } catch {
+    return null;
+  }
+}
+
+// Het bestand dat /video/<id> uitlevert: de bevroren kopie, anders de webversie
+// uit data/streamable/, anders het origineel.
+function resolveVideoFile(id, mapping = loadMapping(), archive = loadArchive(DATA_DIR)) {
+  const archived = archive.videos[id];
+  if (archived) return path.join(archived.directory, `${id}.mp4`);
+  const relativePath = mapping[id];
+  if (!relativePath) return null;
+  const streamablePath = path.join(STREAM_DIR, `${id}.mp4`);
+  return fs.existsSync(streamablePath) ? streamablePath : path.join(VIDEOS_DIR, relativePath);
+}
+
+function resolveThumbnailFile(id, mapping = loadMapping(), archive = loadArchive(DATA_DIR)) {
+  const archived = archive.videos[id];
+  if (archived) return archived.hasThumbnail ? path.join(archived.directory, `${id}.jpg`) : null;
+  if (!mapping[id]) return null;
+  const thumbPath = path.join(THUMB_DIR, `${id}.jpg`);
+  return fs.existsSync(thumbPath) ? thumbPath : null;
+}
+
+// Media-URL met bestandsextensie (Cloudflare cachet .mp4 en .jpg standaard wél,
+// een extensieloos pad niet) en met de versiesleutel als cache-buster.
+function mediaUrl(route, id, filePath) {
+  const version = filePath ? fileVersion(filePath) : null;
+  const extension = route === "video" ? ".mp4" : ".jpg";
+  return `/${route}/${encodeURIComponent(id)}${extension}${version ? `?v=${version}` : ""}`;
+}
+
+// Met versiesleutel mag een tussenliggende cache het bestand lang bewaren;
+// zonder sleutel blijft de oude, altijd-hervalideren-regel gelden zodat een
+// vervangen video meteen zichtbaar is.
+function mediaCacheControl(req) {
+  return req.query.v ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate";
+}
 
 function safeEqual(left, right) {
   const leftBuffer = Buffer.from(left);
@@ -186,7 +250,20 @@ function adminPage(result = "") {
   const folders = mappedFolders(mapping);
   const gallerySettings = loadGallerySettings();
   const frozenAlbums = loadArchive(DATA_DIR).albums;
+  const viewCounts = views.all();
+  const statsOf = (id) => viewCounts[id] || emptyStats();
+  const playsInFolder = (folderVideos) => folderVideos.reduce((total, [id]) => total + statsOf(id).plays, 0);
+  const shortDate = (isoDate) => (isoDate ? new Date(isoDate).toLocaleDateString("nl-NL", { day: "numeric", month: "short", year: "numeric" }) : "—");
   const videosByFolder = new Map(folders.map((folder) => [folder, videos.filter(([, relativePath]) => path.dirname(relativePath) === folder)]));
+  const statsRows = videos
+    .map(([id, relativePath]) => ({ id, relativePath, stats: statsOf(id), recent: recentTotals(viewCounts[id], 30) }))
+    .sort((left, right) => right.stats.plays - left.stats.plays || right.stats.opens - left.stats.opens || left.relativePath.localeCompare(right.relativePath, "nl"));
+  const statsTotals = statsRows.reduce((total, row) => ({
+    opens: total.opens + row.stats.opens,
+    plays: total.plays + row.stats.plays,
+    completions: total.completions + row.stats.completions,
+    recentPlays: total.recentPlays + row.recent.plays,
+  }), { opens: 0, plays: 0, completions: 0, recentPlays: 0 });
   const foldersHtml = folders.length
     ? `<section class="album-workspace">
         <aside class="album-menu" aria-label="Vakantie-albums">
@@ -211,7 +288,7 @@ function adminPage(result = "") {
                 <div>
                   <span class="eyebrow">Album</span>
                   <h2>${escapeHtml(folder)}</h2>
-                  <p>${count} ${count === 1 ? "film" : "films"} · ${frozenAlbums[folder] ? "bevroren editie" : "actieve editie"}</p>
+                  <p>${count} ${count === 1 ? "film" : "films"} · ${frozenAlbums[folder] ? "bevroren editie" : "actieve editie"} · ${playsInFolder(folderVideos)}× gestart</p>
                 </div>
                 <div class="actions">
                   <a class="button" href="${escapeHtml(url)}" target="_blank" rel="noopener">Open pagina</a>
@@ -224,9 +301,11 @@ function adminPage(result = "") {
                   ${folderVideos.map(([id, relativePath]) => {
                     const label = parseVideoLabel(relativePath);
                     const videoUrl = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
+                    const stats = statsOf(id);
                     return `<article>
                       <strong>${escapeHtml(label.activity)}</strong>
                       <small>${escapeHtml(relativePath)}</small>
+                      <small>${stats.opens}× geopend · ${stats.plays}× gestart · ${stats.completions}× uitgekeken · laatst ${escapeHtml(shortDate(stats.lastAt))}</small>
                       <a href="${escapeHtml(videoUrl)}" target="_blank" rel="noopener">${escapeHtml(videoUrl)}</a>
                       <div class="actions">
                         <button class="copy" type="button" data-url="${escapeHtml(videoUrl)}">Kopieer link</button>
@@ -375,6 +454,14 @@ function adminPage(result = "") {
     button:disabled { opacity: .55; cursor: wait; }
     .empty { margin-top: 32px; color: #6b7280; }
     .all-links { max-width: 1180px; margin: 24px auto 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .stats-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .stats-table th, .stats-table td { padding: 8px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    .stats-table th:first-child, .stats-table td:first-child { text-align: left; white-space: normal; }
+    .stats-table thead th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+    .stats-table tfoot th, .stats-table tfoot td { border-bottom: 0; font-weight: 800; }
+    .stats-table small { display: block; color: #6b7280; font-size: 12px; }
+    .stats-scroll { overflow-x: auto; }
+    #scan-log { max-height: 320px; overflow: auto; background: #111827; color: #e5e7eb; padding: 12px 14px; border-radius: 8px; font-size: 13px; white-space: pre-wrap; }
     @media (max-width: 760px) {
       body { padding: 18px; }
       .topbar, .album-header { display: grid; align-items: start; }
@@ -480,6 +567,38 @@ function adminPage(result = "") {
       <button id="download-all" type="submit"${folders.length ? "" : " disabled"}>Download vakantiealbum (.zip)</button>
       <p id="batch-status" role="status" aria-live="polite"></p>
     </form>
+    </div>
+  </details>
+  <details class="studio utility-panel" id="kijkcijfers"${statsRows.length ? " open" : ""}>
+    <summary>Kijkcijfers</summary>
+    <div class="studio-body">
+      <h2>Kijkcijfers</h2>
+      <p>Geteld op de afspeelpagina zelf: <strong>geopend</strong> (QR gescand of link geopend), <strong>gestart</strong> (de film begint te lopen) en <strong>uitgekeken</strong> (tot het einde). Zonder cookies en zonder IP-adressen; wie de pagina opnieuw laadt, telt opnieuw mee. Linkvoorbeelden in WhatsApp tellen niet mee, die spelen geen video af.</p>
+      <div class="stats-scroll">
+        <table class="stats-table">
+          <thead><tr><th>Video</th><th>Geopend</th><th>Gestart</th><th>Uitgekeken</th><th>Gestart (30 dagen)</th><th>Laatst bekeken</th></tr></thead>
+          <tbody>
+            ${statsRows.length ? statsRows.map(({ id, relativePath, stats, recent }) => `<tr>
+              <td><strong>${escapeHtml(parseVideoLabel(relativePath).activity)}</strong><small>${escapeHtml(relativePath)}</small></td>
+              <td>${stats.opens}</td>
+              <td>${stats.plays}</td>
+              <td>${stats.completions}</td>
+              <td>${recent.plays}</td>
+              <td>${escapeHtml(shortDate(stats.lastAt))}</td>
+            </tr>`).join("") : `<tr><td colspan="6">Nog geen video&apos;s.</td></tr>`}
+          </tbody>
+          <tfoot><tr><th>Totaal · ${statsRows.length} ${statsRows.length === 1 ? "film" : "films"}</th><td>${statsTotals.opens}</td><td>${statsTotals.plays}</td><td>${statsTotals.completions}</td><td>${statsTotals.recentPlays}</td><td></td></tr></tfoot>
+        </table>
+      </div>
+    </div>
+  </details>
+  <details class="studio utility-panel" id="scan-panel"${generationInProgress ? " open" : ""}>
+    <summary>Scan en webversies</summary>
+    <div class="studio-body">
+      <h2>Scan en webversies</h2>
+      <p>Bij het scannen krijgt elke nieuwe video een ID, een QR-code, een startbeeld en een webversie die vlot afspeelt. Zware bronnen (4K, hoge bitrate of HEVC) worden daarbij één keer omgezet naar maximaal ${STREAM_LIMITS.maxShortSide}p en ${STREAM_LIMITS.maxBitrateKbps} kb/s. Dat kost rekentijd op de NAS, dus de scan loopt in de achtergrond door — ook als je deze pagina sluit.</p>
+      <p id="scan-state" role="status" aria-live="polite">${generationInProgress ? "Bezig met scannen…" : "Geen scan bezig."}</p>
+      <pre id="scan-log" data-running="${generationInProgress}">${escapeHtml(scanLogTail() || "Nog geen scan uitgevoerd.")}</pre>
     </div>
   </details>
   ${videosHtml}
@@ -950,6 +1069,25 @@ function adminPage(result = "") {
         setTimeout(() => { button.textContent = originalText; }, 1600);
       });
     });
+
+    const scanLog = document.getElementById("scan-log");
+    const scanState = document.getElementById("scan-state");
+    async function pollScan() {
+      try {
+        const response = await fetch("/admin/scan-status");
+        if (!response.ok) return;
+        const status = await response.json();
+        scanLog.textContent = status.log || "Nog geen scan uitgevoerd.";
+        scanState.textContent = status.running ? "Bezig met scannen…" : "Geen scan bezig.";
+        if (status.running) {
+          scanLog.scrollTop = scanLog.scrollHeight;
+          setTimeout(pollScan, 4000);
+        }
+      } catch {
+        setTimeout(pollScan, 10000);
+      }
+    }
+    if (scanLog && scanLog.dataset.running === "true") pollScan();
   </script>
 </body>
 </html>`;
@@ -1077,6 +1215,10 @@ app.post("/admin/freeze", requireAdmin, (req, res) => {
   });
 });
 
+// Een scan kan lang duren: het omzetten van zware video's naar een vlot
+// afspeelbare webversie is rekenwerk. Daarom draait de scan in de achtergrond
+// en schrijft hij naar data/generate.log; de beheerpagina toont die voortgang.
+// Zo loopt het verzoek (of de tunnel ervoor) nooit in een time-out.
 app.post("/admin/generate", requireAdmin, (req, res) => {
   if (generationInProgress) {
     res.status(409).type("html").send(adminPage("Er draait al een scan. Probeer het straks opnieuw."));
@@ -1084,17 +1226,26 @@ app.post("/admin/generate", requireAdmin, (req, res) => {
   }
 
   generationInProgress = true;
-  execFile(process.execPath, [path.join(__dirname, "generate.js")], { timeout: 5 * 60 * 1000 }, (error, stdout, stderr) => {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const logFile = fs.openSync(SCAN_LOG_FILE, "w");
+  let finished = false;
+  const finish = (message) => {
+    if (finished) return;
+    finished = true;
     generationInProgress = false;
-    const output = [stdout, stderr].filter(Boolean).join("\n").trim();
+    fs.closeSync(logFile);
+    fs.appendFileSync(SCAN_LOG_FILE, `\n${message}\n`);
+  };
 
-    if (error) {
-      res.status(500).type("html").send(adminPage(`Genereren mislukt.\n${output || error.message}`));
-      return;
-    }
+  const scan = spawn(process.execPath, [path.join(__dirname, "generate.js")], { stdio: ["ignore", logFile, logFile] });
+  scan.on("error", (error) => finish(`Scan kon niet starten: ${error.message}`));
+  scan.on("close", (code) => finish(code === 0 ? "Scan afgerond." : `Scan gestopt (code ${code}).`));
 
-    res.status(200).type("html").send(adminPage(output || "Genereren voltooid."));
-  });
+  res.status(202).type("html").send(adminPage("Scan gestart. De voortgang staat hieronder bij 'Scan en webversies'; je kunt deze pagina open laten of later terugkomen."));
+});
+
+app.get("/admin/scan-status", requireAdmin, (req, res) => {
+  res.status(200).json({ running: generationInProgress, log: scanLogTail() });
 });
 
 function loadMapping() {
@@ -1121,6 +1272,8 @@ function renderPlayer(req, res) {
   const videoTitle = path.parse(relativePath).name;
   const escapedTitle = escapeHtml(videoTitle);
   const pageUrl = `${BASE_URL}/v?id=${encodeURIComponent(id)}`;
+  const videoSrc = mediaUrl("video", id, resolveVideoFile(id, mapping));
+  const posterSrc = mediaUrl("thumb", id, resolveThumbnailFile(id, mapping));
 
   const html = `<!DOCTYPE html>
 <html lang="nl">
@@ -1133,23 +1286,56 @@ function renderPlayer(req, res) {
   <meta property="og:title" content="${escapedTitle}" />
   <meta property="og:description" content="Bekijk deze video" />
   <meta property="og:url" content="${escapeHtml(pageUrl)}" />
+  <link rel="preload" as="image" href="${posterSrc}" />
   <style>
     html, body { margin: 0; height: 100%; background: #000; }
     .wrap { display: flex; align-items: center; justify-content: center; height: 100%; }
     video { max-width: 100%; max-height: 100%; }
+    .buffering { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; pointer-events: none; }
+    .buffering[data-visible="true"] { display: flex; }
+    .buffering i { width: 46px; height: 46px; border: 4px solid rgba(255, 255, 255, .25); border-top-color: #fff; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <video controls playsinline preload="metadata" poster="/thumb/${encodeURIComponent(id)}">
-      <source src="/video/${encodeURIComponent(id)}" type="video/mp4" />
+    <video controls playsinline preload="auto" poster="${posterSrc}">
+      <source src="${videoSrc}" type="video/mp4" />
       Je browser ondersteunt deze video niet.
     </video>
   </div>
+  <div class="buffering" id="buffering" aria-hidden="true"><i></i></div>
+  <script>
+    (function () {
+      var video = document.querySelector("video");
+      var spinner = document.getElementById("buffering");
+      if (!video) return;
+
+      // Laat zien dat de film staat te laden in plaats van stil te haperen.
+      function busy(state) { spinner.dataset.visible = state ? "true" : "false"; }
+      ["waiting", "stalled", "seeking"].forEach(function (name) { video.addEventListener(name, function () { busy(true); }); });
+      ["playing", "canplay", "seeked", "error", "pause"].forEach(function (name) { video.addEventListener(name, function () { busy(false); }); });
+
+      // Kijkcijfers: hoogstens één telling per gebeurtenis per paginabezoek,
+      // zonder cookies en zonder dat de bezoeker herkenbaar is.
+      var id = ${JSON.stringify(id)};
+      var counted = {};
+      function count(event) {
+        if (counted[event]) return;
+        counted[event] = true;
+        var body = new URLSearchParams({ id: id, event: event });
+        if (navigator.sendBeacon && navigator.sendBeacon("/stats/view", body)) return;
+        fetch("/stats/view", { method: "POST", body: body, keepalive: true }).catch(function () {});
+      }
+      count("open");
+      video.addEventListener("playing", function () { count("play"); });
+      video.addEventListener("ended", function () { count("complete"); });
+    })();
+  </script>
 </body>
 </html>`;
 
-  res.status(200).type("html").send(html);
+  res.set("Cache-Control", "no-store").status(200).type("html").send(html);
 }
 
 // Video-bestand zelf. res.sendFile ondersteunt Range-requests automatisch,
@@ -1158,17 +1344,24 @@ function renderPlayer(req, res) {
 // zie STREAM_DIR), gebruiken we die: de browser kan dan direct beginnen met
 // afspelen in plaats van eerst het hele bestand te moeten downloaden.
 app.get("/video/:id", (req, res) => {
-  const archived = loadArchive(DATA_DIR).videos[req.params.id];
-  if (archived) { res.sendFile(path.join(archived.directory, `${req.params.id}.mp4`)); return; }
+  // /video/<id>.mp4 en /video/<id> wijzen naar hetzelfde bestand; de extensie
+  // staat erbij omdat caches (zoals Cloudflare) daarop standaard wél cachen.
+  const id = String(req.params.id).replace(/\.mp4$/i, "");
+  const archived = loadArchive(DATA_DIR).videos[id];
+  if (archived) {
+    res.set("Cache-Control", mediaCacheControl(req));
+    res.sendFile(path.join(archived.directory, `${id}.mp4`));
+    return;
+  }
   const mapping = loadMapping();
-  const relativePath = mapping[req.params.id];
+  const relativePath = mapping[id];
 
   if (!relativePath) {
     res.status(404).send("Video niet gevonden.");
     return;
   }
 
-  const streamablePath = path.join(STREAM_DIR, `${req.params.id}.mp4`);
+  const streamablePath = path.join(STREAM_DIR, `${id}.mp4`);
   const absolutePath = fs.existsSync(streamablePath) ? streamablePath : path.join(VIDEOS_DIR, relativePath);
 
   // Veiligheidscheck: voorkom dat iemand via het pad buiten de toegestane mappen komt
@@ -1177,9 +1370,10 @@ app.get("/video/:id", (req, res) => {
     return;
   }
 
-  // Dezelfde ID blijft behouden als een bronvideo wordt vervangen. Laat de
-  // browser daarom hervalideren, zodat een vernieuwde kopie zichtbaar wordt.
-  res.set("Cache-Control", "public, max-age=0, must-revalidate");
+  // Dezelfde ID blijft behouden als een bronvideo wordt vervangen. Zonder
+  // versiesleutel laat de browser daarom hervalideren; mét sleutel (?v=) hoort
+  // bij precies dit bestand en mag alles onderweg het lang bewaren.
+  res.set("Cache-Control", mediaCacheControl(req));
   res.sendFile(absolutePath, (err) => {
     if (err && !res.headersSent) {
       res.status(404).send("Video niet gevonden.");
@@ -1190,14 +1384,15 @@ app.get("/video/:id", (req, res) => {
 // Thumbnail (eerste frame) van een video, gebruikt als poster op de afspeelpagina
 // en op de publieke galerij-pagina.
 app.get("/thumb/:id", (req, res) => {
-  const archived = loadArchive(DATA_DIR).videos[req.params.id];
+  const id = String(req.params.id).replace(/\.jpg$/i, "");
+  const archived = loadArchive(DATA_DIR).videos[id];
   if (archived) {
     if (!archived.hasThumbnail) { res.status(404).send("Thumbnail niet gevonden."); return; }
-    res.sendFile(path.join(archived.directory, `${req.params.id}.jpg`));
+    res.set("Cache-Control", mediaCacheControl(req));
+    res.sendFile(path.join(archived.directory, `${id}.jpg`));
     return;
   }
   const mapping = loadMapping();
-  const id = req.params.id;
 
   if (!mapping[id]) {
     res.status(404).send("Thumbnail niet gevonden.");
@@ -1210,8 +1405,28 @@ app.get("/thumb/:id", (req, res) => {
     return;
   }
 
-  res.set("Cache-Control", "public, max-age=0, must-revalidate");
+  res.set("Cache-Control", mediaCacheControl(req));
   res.sendFile(thumbPath);
+});
+
+// Kijkcijfers. De afspeelpagina meldt hier dat een film geopend, gestart of
+// uitgekeken is. Alleen bestaande ID's tellen mee, zodat de telling niet met
+// verzonnen ID's volgeschreven kan worden.
+app.post("/stats/view", (req, res) => {
+  const id = String(req.body.id || "");
+  const event = String(req.body.event || "");
+
+  if (!/^[a-f0-9]{10}$/.test(id) || !["open", "play", "complete"].includes(event)) {
+    res.status(400).end();
+    return;
+  }
+  if (!loadMapping()[id]) {
+    res.status(404).end();
+    return;
+  }
+
+  views.record(id, event);
+  res.status(204).end();
 });
 
 app.get("/thailand-films.css", (req, res) => {
@@ -1238,7 +1453,7 @@ function renderAlbumIndex(req, res) {
     const entries = Object.entries(mapping).filter(([, file]) => path.dirname(file) === folder).sort((a, b) => a[1].localeCompare(b[1], "nl"));
     const first = entries.find(([id]) => archive.videos[id]?.hasThumbnail || fs.existsSync(path.join(THUMB_DIR, `${id}.jpg`)));
     return { folder, title: folder === "." ? "Overige herinneringen" : active.title, subtitle: active.subtitle,
-      count: entries.length, cover: first ? `/thumb/${encodeURIComponent(first[0])}` : active.theme === "safari" ? "/assets/safari-header.jpg" : null };
+      count: entries.length, cover: first ? mediaUrl("thumb", first[0], resolveThumbnailFile(first[0], mapping, archive)) : active.theme === "safari" ? "/assets/safari-header.jpg" : null };
   });
   res.set("Cache-Control", "no-store").type("html").send(require("./album-index")(albums));
 }
@@ -1246,10 +1461,12 @@ app.get("/gallery", renderGallery);
 function renderGallery(req, res) {
   if (req.query.folder === undefined) return renderAlbumIndex(req, res);
   const requestedFolder = typeof req.query.folder === "string" ? req.query.folder : null;
-  const archived = loadArchive(DATA_DIR).albums[requestedFolder];
+  const archive = loadArchive(DATA_DIR);
+  const archived = archive.albums[requestedFolder];
   if (archived) { res.sendFile(path.join(archived.directory, "gallery.html")); return; }
   const mapping = loadMapping();
   const folders = mappedFolders(mapping);
+  const thumbUrl = (id) => mediaUrl("thumb", id, resolveThumbnailFile(id, mapping, archive));
 
   if (requestedFolder !== null && !folders.includes(requestedFolder) && !(requestedFolder === "." && Object.values(mapping).some(file => path.dirname(file) === ".")) && requestedFolder !== "zuid-afrika") {
     res.status(404).send("Vakantie-album niet gevonden.");
@@ -1280,7 +1497,7 @@ function renderGallery(req, res) {
       <article class="safari-film">
         <a href="/v?id=${encodeURIComponent(id)}" aria-label="Bekijk ${escapeHtml(name)}">
           <div class="safari-film__image">
-            <img src="/thumb/${encodeURIComponent(id)}" alt="${escapeHtml(name)}" loading="lazy" />
+            <img src="${thumbUrl(id)}" alt="${escapeHtml(name)}" loading="lazy" />
             <span class="safari-play" aria-hidden="true">▶</span>
           </div>
           <div class="safari-film__caption"><span class="safari-number">${String(index + 1).padStart(2, "0")}</span><h2>${escapeHtml(name)}</h2><span aria-hidden="true">↗</span></div>
@@ -1323,7 +1540,7 @@ function renderGallery(req, res) {
       <article class="film-card">
         <a class="film-card__link" href="/v?id=${encodeURIComponent(id)}" aria-label="Bekijk ${escapeHtml(name)}">
           <div class="film-card__image-wrap">
-            <img src="/thumb/${encodeURIComponent(id)}" alt="${escapeHtml(name)}" loading="lazy" />
+            <img src="${thumbUrl(id)}" alt="${escapeHtml(name)}" loading="lazy" />
             <span class="film-card__play" aria-hidden="true"><span></span></span>
           </div>
           <h2><span class="film-card__icon" aria-hidden="true">▶</span> ${escapeHtml(name)}</h2>
@@ -1372,7 +1589,7 @@ function renderGallery(req, res) {
         <div class="grid">
           ${videos.map(({ id, name }) => `
             <a class="card" href="/v?id=${encodeURIComponent(id)}">
-              <img src="/thumb/${encodeURIComponent(id)}" alt="${escapeHtml(name)}" loading="lazy" />
+              <img src="${thumbUrl(id)}" alt="${escapeHtml(name)}" loading="lazy" />
               <span>${escapeHtml(name)}</span>
             </a>`).join("")}
         </div>
@@ -1428,6 +1645,14 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`Server draait op poort ${PORT}`);
   });
+
+  // Bij een herstart van de container de laatste kijkcijfers nog wegschrijven.
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.on(signal, () => {
+      views.flush();
+      process.exit(0);
+    });
+  }
 }
 
-module.exports = { app, adminPage, parseVideoLabel, renderGallery, renderPlayer };
+module.exports = { app, adminPage, parseVideoLabel, renderGallery, renderPlayer, views };

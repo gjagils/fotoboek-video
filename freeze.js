@@ -11,6 +11,7 @@ const BASE_URL = (process.env.BASE_URL || 'https://albumvideo.gerdjan.nl').repla
 function capturePage(render, query) {
   let html;
   const response = {
+    set() { return this; }, // Kopregels (zoals Cache-Control) horen niet in een vastgelegde pagina.
     status(code) { if (code !== 200) throw new Error('Album of video bestaat niet'); return this; },
     type() { return this; },
     send(value) { html = value; },
