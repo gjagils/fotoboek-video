@@ -7,8 +7,41 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'streaming-views-test-')
 process.env.DATA_DIR = path.join(temporary, 'data');
 process.env.VIDEOS_DIR = path.join(temporary, 'videos');
 process.env.ADMIN_PASSWORD = 'test-only';
-const { app, views } = require('../server');
+const { app, views, renderPlayer } = require('../server');
+const vm = require('vm');
 const { parseProbe, chooseStreamPlan, limitsFromEnv, transcodeArgs, remuxArgs } = require('../streaming');
+
+// Draait het script van de afspeelpagina in een nagemaakte speler, zodat het
+// gedrag in de browser hier getest kan worden zonder browser.
+function runPlayerScript(html) {
+  const source = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const listeners = new Map();
+  const timers = new Map();
+  const beacons = [];
+  let nextTimer = 1;
+  const video = {
+    paused: true, ended: false, readyState: 0, HAVE_FUTURE_DATA: 3,
+    addEventListener(name, handler) { listeners.set(name, [...(listeners.get(name) || []), handler]); },
+  };
+  const spinner = { dataset: {} };
+  const context = {
+    document: { querySelector: () => video, getElementById: () => spinner },
+    navigator: { sendBeacon: (url, body) => { beacons.push(`${url} ${body}`); return true; } },
+    URLSearchParams,
+    fetch: () => Promise.resolve(),
+    setTimeout(handler, delay) { timers.set(nextTimer, handler); return nextTimer++; },
+    clearTimeout(id) { timers.delete(id); },
+  };
+  vm.createContext(context);
+  new vm.Script(source).runInContext(context);
+  return {
+    video,
+    beacons,
+    spinnerVisible: () => spinner.dataset.visible === 'true',
+    fire: (name) => (listeners.get(name) || []).forEach((handler) => handler()),
+    tick: () => { const due = [...timers.values()]; timers.clear(); due.forEach((handler) => handler()); },
+  };
+}
 const data = process.env.DATA_DIR;
 const id = 'abcdef0123';
 const auth = 'Basic ' + Buffer.from('admin:test-only').toString('base64');
@@ -109,7 +142,7 @@ test('de afspeelpagina buffert vooruit, cachet per versie en telt kijkcijfers', 
     assert.match(admin, /1× geopend · 2× gestart · 1× uitgekeken/);
     assert.match(admin, /2× gestart<\/p>/); // albumtotaal in de kop
     assert.equal((await fetch(base + '/admin/scan-status')).status, 401);
-    assert.deepEqual(await (await fetch(base + '/admin/scan-status', { headers: { authorization: auth } })).json(), { running: false, log: '' });
+    assert.deepEqual(await (await fetch(base + '/admin/scan-status', { headers: { authorization: auth } })).json(), { running: false, label: '', log: '' });
   } finally { await new Promise(resolve => server.close(resolve)); }
 });
 
@@ -131,6 +164,46 @@ test('een achtergebleven slot van een gestopt proces blokkeert een nieuwe scan n
   await assert.rejects(withDataLock(lockDir, async () => {}), /Er draait al/);
   assert.ok(fs.existsSync(lockFile));
   fs.rmSync(lockFile);
+});
+
+test('het laadrondje volgt de speler en blijft niet hangen op een losse melding', async () => {
+  json(path.join(data, 'mapping.json'), { [id]: 'Reis/film.mp4' });
+  const player = runPlayerScript(await new Promise((resolve) => {
+    renderPlayer({ query: { id } }, { set() { return this; }, status() { return this; }, type() { return this; }, send: resolve });
+  }));
+
+  assert.deepEqual(player.beacons, [`/stats/view id=${id}&event=open`]); // Geopend telt meteen.
+  assert.equal(player.spinnerVisible(), false); // Stilstaand op het startbeeld: geen rondje.
+
+  // Aan het laden: pas na de korte vertraging verschijnt het rondje.
+  Object.assign(player.video, { paused: false, readyState: 1 });
+  player.fire('waiting');
+  assert.equal(player.spinnerVisible(), false);
+  player.tick();
+  assert.equal(player.spinnerVisible(), true);
+
+  // Er komt beeld: rondje weg, en "gestart" telt één keer.
+  Object.assign(player.video, { readyState: 4 });
+  player.fire('playing');
+  player.fire('playing');
+  assert.equal(player.spinnerVisible(), false);
+  assert.deepEqual(player.beacons.slice(1), [`/stats/view id=${id}&event=play`]);
+
+  // Safari meldt "stalled" zodra het downloaden pauzeert met een volle buffer;
+  // de film speelt gewoon door, dus er hoort geen rondje te verschijnen.
+  player.fire('stalled');
+  player.tick();
+  assert.equal(player.spinnerVisible(), false);
+
+  // Spoelen laat het rondje weer even zien, en aan het eind verdwijnt het.
+  Object.assign(player.video, { readyState: 1 });
+  player.fire('seeking');
+  player.tick();
+  assert.equal(player.spinnerVisible(), true);
+  Object.assign(player.video, { readyState: 4, paused: true, ended: true });
+  player.fire('ended');
+  assert.equal(player.spinnerVisible(), false);
+  assert.deepEqual(player.beacons.slice(2), [`/stats/view id=${id}&event=complete`]);
 });
 
 test.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
