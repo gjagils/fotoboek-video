@@ -1,0 +1,7 @@
+module.exports = ({settings, videos, thumbUrl, escapeHtml: e}) => `<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${e(settings.title)}</title><link rel="stylesheet" href="/assets/wintersport.css" /></head>
+<body><nav><a href="/gallery">← Alle albums</a><span>DOLOMITI · 2026</span></nav>
+<header><img src="/assets/wintersport-header.png" alt="Squash Wintersport 2026 — Dolomiti. Skiën, Hitster en whiskey."><div class="heading"><p class="eyebrow">Het squashteam in de sneeuw</p><h1>${e(settings.title)}</h1>${settings.subtitle ? `<p>${e(settings.subtitle)}</p>` : ''}</div></header>
+<main><div class="section"><h2>Van de piste naar de laatste plaat.</h2><span>${videos.length} ${videos.length === 1 ? 'film' : 'films'}</span></div><p class="intro">Overdag de bergen. ’s Avonds Hitster, whiskey en sterke verhalen.</p>
+<div class="films">${videos.map(({id,name},i)=>`<a class="film" href="/v?id=${encodeURIComponent(id)}"><div class="picture"><img src="${thumbUrl(id)}" alt="" loading="lazy"><span class="play" aria-hidden="true">▶</span></div><div class="caption"><span class="number">${String(i+1).padStart(2,'0')}</span><h3>${e(name)}</h3><span aria-hidden="true">↗</span></div></a>`).join('')}</div>${videos.length ? '' : '<p>De eerste wintersportfilm verschijnt hier binnenkort.</p>'}</main>
+<footer><span>SQUASH · WINTERSPORT · 2026</span><span>Op naar de volgende!</span></footer></body></html>`;

@@ -27,6 +27,8 @@ function capturePage(render, query, request = {}) {
 // koptekeningen gaan mee in de pagina zelf.
 function inlineGalleryAssets(gallery) {
   return gallery
+    .replace('<link rel="stylesheet" href="/assets/wintersport.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'assets/wintersport.css'), 'utf8')}</style>`)
+    .replace('src="/assets/wintersport-header.png"', () => `src="data:image/png;base64,${fs.readFileSync(path.join(__dirname, 'assets/wintersport-header.png')).toString('base64')}"`)
     .replace('<link rel="stylesheet" href="/thailand-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'thailand-films.css'), 'utf8')}</style>`)
     .replace('src="/assets/thailand-header-decoration.svg"', () => `src="data:image/svg+xml;base64,${fs.readFileSync(path.join(__dirname, 'assets/thailand-header-decoration.svg')).toString('base64')}"`)
     .replace('<link rel="stylesheet" href="/assets/safari-films.css" />', () => `<style>${fs.readFileSync(path.join(__dirname, 'assets/safari-films.css'), 'utf8')}</style>`)

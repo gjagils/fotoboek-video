@@ -349,6 +349,7 @@ function adminPage(result = "") {
                       <option value="default"${settings.theme === "default" ? " selected" : ""}>Standaard</option>
                       <option value="thailand"${settings.theme === "thailand" ? " selected" : ""}>Thailand-reisdagboek</option>
                       <option value="safari"${settings.theme === "safari" ? " selected" : ""}>Zuid-Afrika · Op safari</option>
+                      <option value="wintersport"${settings.theme === "wintersport" ? " selected" : ""}>Squash Wintersport 2026 · Dolomiti</option>
                     </select>
                   </label>
                   <label>Paginatitel
@@ -1203,7 +1204,7 @@ app.post("/admin/gallery-settings", requireAdmin, async (req, res) => {
   const subtitle = String(req.body.subtitle || "").trim().slice(0, 120);
   const mapping = loadMapping();
 
-  if (!mappedFolders(mapping).includes(folder) || !["default", "thailand", "safari"].includes(theme)) {
+  if (!mappedFolders(mapping).includes(folder) || !["default", "thailand", "safari", "wintersport"].includes(theme)) {
     res.status(400).type("html").send(adminPage("Ongeldige vakantie-instellingen."));
     return;
   }
@@ -1578,6 +1579,11 @@ function renderGallery(req, res) {
     ? null
     : { ...defaultGallerySettings(requestedFolder), ...storedSettings[requestedFolder] };
   const pageTitle = activeSettings?.title || "Video's";
+
+  if (activeSettings?.theme === "wintersport") {
+    res.status(200).type("html").send(require("./assets/wintersport-page")({settings: activeSettings, videos: groups.get(requestedFolder) || [], thumbUrl, escapeHtml}));
+    return;
+  }
 
   if (activeSettings?.theme === "safari") {
     const videos = groups.get(requestedFolder) || [];
