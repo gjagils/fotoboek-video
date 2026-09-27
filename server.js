@@ -1534,7 +1534,7 @@ function renderAlbumIndex(req, res) {
   const mapping = loadMapping();
   const settings = loadGallerySettings();
   const archive = loadArchive(DATA_DIR);
-  const folders = [...new Set([...mappedFolders(mapping), ...Object.keys(archive.albums), "zuid-afrika",
+  const folders = [...new Set([...mappedFolders(mapping), ...Object.keys(archive.albums),
     ...(Object.values(mapping).some(file => path.dirname(file) === ".") ? ["."] : [])])].sort((a, b) => a.localeCompare(b, "nl"));
   const albums = folders.map(folder => {
     const active = { ...defaultGallerySettings(folder), ...settings[folder] };

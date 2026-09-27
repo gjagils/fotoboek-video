@@ -17,13 +17,18 @@ test('public index links albums, escapes titles, includes loose videos and leave
   const response = await fetch(base+'/'); assert.equal(response.status,200);
   const html = await response.text();
   assert.match(html,/Reis &lt;2026&gt;/); assert.match(html,/Samen &amp; weg/);
-  assert.match(html,/gallery\?folder=thailand/); assert.match(html,/gallery\?folder=zuid-afrika/);
+  assert.match(html,/gallery\?folder=thailand/); assert.doesNotMatch(html,/gallery\?folder=zuid-afrika/);
   assert.match(html,/Overige herinneringen/); assert.doesNotMatch(html,/\/admin/);
   assert.equal(await(await fetch(base+'/gallery')).text(),html);
   for(const url of ['/gallery?folder=thailand','/gallery?folder=.','/assets/album-index.css']) assert.equal((await fetch(base+url)).status,200);
   assert.equal((await fetch(base+'/admin')).status,401);
+  fs.writeFileSync(path.join(root,'mapping.json'),JSON.stringify({a:'Thailand/Film.mp4',b:'Zuid-Afrika/Safari.mp4'}));
+  const actual = await(await fetch(base+'/')).text();
+  assert.match(actual,/2 albums/);
+  assert.match(actual,/gallery\?folder=Zuid-Afrika/);
+  assert.doesNotMatch(actual,/gallery\?folder=zuid-afrika/);
   fs.writeFileSync(path.join(root,'mapping.json'),'{}');
-  assert.match(await(await fetch(base+'/')).text(),/Binnenkort/);
+  assert.doesNotMatch(await(await fetch(base+'/')).text(),/gallery\?folder=zuid-afrika/);
  } finally { await new Promise(resolve=>server.close(resolve)); }
 });
 test.after(()=>fs.rmSync(root,{recursive:true,force:true}));
